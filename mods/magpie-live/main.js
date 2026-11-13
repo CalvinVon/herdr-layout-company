@@ -58,6 +58,8 @@ export default class MagpieLive extends View {
     if (!Array.isArray(this.overviewOrder)) this.overviewOrder = [];
     try { this.hiddenSections = JSON.parse(localStorage.getItem("magpie-live.hidden-sections") || "[]"); } catch { this.hiddenSections = []; }
     if (!Array.isArray(this.hiddenSections)) this.hiddenSections = [];
+    try { this.pinnedSections = JSON.parse(localStorage.getItem("magpie-live.pinned-sections") || "[]"); } catch { this.pinnedSections = []; }
+    if (!Array.isArray(this.pinnedSections)) this.pinnedSections = [];
     try { this.hiddenProviders = JSON.parse(localStorage.getItem("magpie-live.hidden-providers") || "[]"); } catch { this.hiddenProviders = []; }
     if (!Array.isArray(this.hiddenProviders)) this.hiddenProviders = [];
     this.editOverview = false;
@@ -67,6 +69,7 @@ export default class MagpieLive extends View {
     this.history = [];
     this.historyAt = 0;
     this.width = 500;
+    this.height = 600;
     this.active = [];
     this.routes = {};
     this.recent = [];
@@ -517,13 +520,16 @@ export default class MagpieLive extends View {
         const move = (direction, next) => { const updated = [...order]; [updated[i], updated[i + direction]] = [updated[i + direction], updated[i]]; this.overviewOrder = updated; localStorage.setItem("magpie-live.overview-order", JSON.stringify(updated)); next.notify(); };
         return h_flex().items_center().gap(8).p(6).rounded(5).bg(t.raised)
           .child(div().flex_1().text_size(10).text_color(t.foreground).child(section.name))
-          .when(i > 0, row => row.child(div().id(`overview-top-${id}`).cursor_pointer().text_size(10).text_color(t.muted).on_click((_e, next) => { this.overviewOrder = [id, ...order.filter((item) => item !== id)]; localStorage.setItem("magpie-live.overview-order", JSON.stringify(this.overviewOrder)); next.notify(); }).child("置顶")))
+          .child(div().id(`overview-pin-${id}`).cursor_pointer().text_size(10).text_color(this.pinnedSections.includes(id) ? t.accent : t.muted).on_click((_e, next) => { this.pinnedSections = this.pinnedSections.includes(id) ? this.pinnedSections.filter((item) => item !== id) : [...this.pinnedSections, id]; localStorage.setItem("magpie-live.pinned-sections", JSON.stringify(this.pinnedSections)); next.notify(); }).child(this.pinnedSections.includes(id) ? "取消固定" : "固定"))
           .when(i > 0, row => row.child(div().id(`overview-up-${id}`).cursor_pointer().text_color(t.muted).on_click((_e, next) => move(-1, next)).child("↑")))
           .when(i < order.length - 1, row => row.child(div().id(`overview-down-${id}`).cursor_pointer().text_color(t.muted).on_click((_e, next) => move(1, next)).child("↓")))
           .child(div().id(`overview-visibility-${id}`).cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.hiddenSections = hidden ? this.hiddenSections.filter((item) => item !== id) : [...this.hiddenSections, id]; localStorage.setItem("magpie-live.hidden-sections", JSON.stringify(this.hiddenSections)); next.notify(); }).child(hidden ? "显示" : "隐藏"));
       }));
+      const sectionView = (id) => div().id(`overview-section-${id}`).p(8).rounded(8).border(1).border_color(t.border).bg(t.surface).hover(style => style.border_color(t.muted)).child(sections.find((item) => item.id === id).view());
+      const visible = order.filter((id) => !this.hiddenSections.includes(id));
+      const pinned = visible.filter((id) => this.pinnedSections.includes(id));
       return v_flex().id("magpie-live-root").size_full().min_h(0).bg(t.surface)
-        .on_size_change((size, next) => { if (this.width !== size.width) { this.width = size.width; next.notify(); } })
+        .on_size_change((size, next) => { if (this.width !== size.width || this.height !== size.height) { this.width = size.width; this.height = size.height; next.notify(); } })
         .child(header)
         .child(h_flex().justify_between().items_center().px(10).py(7)
           .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} ${usage?.calls?.toLocaleString() ?? "—"} 次调用`, t.muted, 10))
@@ -531,9 +537,10 @@ export default class MagpieLive extends View {
         .when(Boolean(this.error), body => body.child(card(t).child(text(`连接异常 · ${this.error}`, t.blocked))))
         .when(Boolean(this.recentError), body => body.child(text(`请求记录暂不可用 · ${this.recentError}`, t.blocked, 10)))
         .child(h_flex().justify_end().px(10).child(div().id("overview-manage").cursor_pointer().px(5).py(3).text_size(10).text_color(t.accent).on_click((_e, next) => { this.editOverview = !this.editOverview; next.notify(); }).child(this.editOverview ? "完成布局" : "管理总览")))
+        .when(pinned.length > 0, body => body.child(div().id("overview-pinned").max_h(Math.max(80, this.height * 0.4)).overflow_y_scrollbar().px(8).child(v_flex().gap(8).children(pinned.map(sectionView)))))
         .child(div().flex_1().min_h(0).overflow_y_scrollbar().child(v_flex().gap(8).p(8)
           .when(this.editOverview, body => body.child(layoutEditor))
-          .children(order.filter((id) => !this.hiddenSections.includes(id)).map((id) => div().id(`overview-section-${id}`).p(8).rounded(8).border(1).border_color(t.border).bg(t.surface).hover(style => style.border_color(t.muted)).child(sections.find((item) => item.id === id).view())))))
+          .children(visible.filter((id) => !this.pinnedSections.includes(id)).map(sectionView))))
         .child(h_flex().justify_between().px(10).py(7).border_t(1).border_color(t.border)
           .child(text("数据只读 · 每 5 秒刷新", t.dim, 9))
           .child(text(currentSession ? requests.some(current) ? "当前请求已标识" : "当前会话暂无近期请求" : "当前 Agent 未关联", t.dim, 9)));
