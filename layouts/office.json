@@ -244,6 +244,12 @@
         }
       ],
       "resizable": false
+    },
+    {
+      "id": "magpie-panel",
+      "type": "block",
+      "content": {"mod": "magpie-live"},
+      "size": {"px": 320}
     }
   ],
   "background": "canvas",
