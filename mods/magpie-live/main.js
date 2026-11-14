@@ -386,8 +386,8 @@ export default class MagpieLive extends View {
       const sourceNames = [...new Set(requests.map(sourceKey))].slice(0, 4);
       const providerNames = [...new Set(requests.map(provider))].slice(0, 4);
       const stageWidth = Math.max(200, Math.min(260, this.width - 20));
-      const edge = 96;
-      const middle = stageWidth / 2;
+      const edge = 48;
+      const middle = 25;
       const sessionColor = (request) => {
         const key = sessionKey(request);
         if (!this.sessionColors.has(key)) {
@@ -409,9 +409,12 @@ export default class MagpieLive extends View {
       }).sort((a, b) => sourceNames.indexOf(sourceKey(a)) - sourceNames.indexOf(sourceKey(b)));
       const nodeHeight = 34;
       const totalHeight = (names) => names.length * nodeHeight + Math.max(0, names.length - 1) * 10;
-      const stageHeight = Math.max(110, totalHeight(sourceNames) + 22, totalHeight(providerNames) + 22);
-      const nodeY = (names, index) => (stageHeight - totalHeight(names)) / 2 + index * (nodeHeight + 10) + nodeHeight / 2;
       const hubHeight = 30;
+      const hubY = 12 + totalHeight(sourceNames) + 20 + hubHeight / 2;
+      const stageHeight = hubY + hubHeight / 2 + 20 + totalHeight(providerNames) + 12;
+      const nodeY = (names, index, top) => top + index * (nodeHeight + 10) + nodeHeight / 2;
+      const sourceY = (index) => nodeY(sourceNames, index, 12);
+      const providerY = (index) => nodeY(providerNames, index, hubY + hubHeight / 2 + 20);
       const line = (x1, y1, x2, y2, color) => {
         const dx = x2 - x1;
         const path = PathBuilder.stroke(1).move_to(x1, y1).cubic_bezier_to(x2, y2, x1 + dx * 0.45, y1, x2 - dx * 0.35, y2).build();
@@ -431,25 +434,25 @@ export default class MagpieLive extends View {
       this.motionPaths = flows.map((request) => ({
         id: `flow-${sessionKey(request)}-${provider(request)}`,
         fromX: edge,
-        fromY: nodeY(sourceNames, sourceNames.indexOf(sourceKey(request))),
+        fromY: sourceY(sourceNames.indexOf(sourceKey(request))),
         middle,
-        midLeftY: stageHeight / 2,
-        midRightY: stageHeight / 2,
-        toX: stageWidth - edge,
-        toY: nodeY(providerNames, providerNames.indexOf(provider(request))),
+        midLeftY: hubY,
+        midRightY: hubY,
+        toX: edge,
+        toY: providerY(providerNames.indexOf(provider(request))),
         color: sessionColor(request),
         current: current(request),
         dimmed: currentActive && !current(request),
       }));
       const graph = div().relative().w(stageWidth).h(stageHeight).rounded(8).border(1).border_color(t.border).bg(t.surface)
-        .children(sourceNames.map((name, i) => line(edge, nodeY(sourceNames, i), middle, stageHeight / 2, active.some((request) => sourceKey(request) === name) ? t.muted : t.border)))
-        .children(providerNames.map((name, i) => line(middle, stageHeight / 2, stageWidth - edge, nodeY(providerNames, i), active.some((request) => provider(request) === name) ? t.muted : t.border)))
+        .children(sourceNames.map((name, i) => line(edge, sourceY(i), middle, hubY, active.some((request) => sourceKey(request) === name) ? t.muted : t.border)))
+        .children(providerNames.map((name, i) => line(middle, hubY, edge, providerY(i), active.some((request) => provider(request) === name) ? t.muted : t.border)))
         .child(this.motionView)
         .children(sourceNames.map((name, i) => {
           const request = requests.find((item) => sourceKey(item) === name);
           const label = current(request) && focusedAgent?.title ? focusedAgent.title : request.session ? `会话 ${request.session.slice(-6)}` : "会话未知";
           const isCurrent = active.some((item) => sourceKey(item) === name && current(item));
-          return h_flex().absolute().left(14).top(nodeY(sourceNames, i) - nodeHeight / 2).w(82).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(isCurrent ? t.accent : t.border).bg(t.surface).tooltip(label)
+          return h_flex().absolute().left(edge).top(sourceY(i) - nodeHeight / 2).w(stageWidth - edge - 12).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(isCurrent ? t.accent : t.border).bg(t.surface).tooltip(label)
             .child(icon(request.agent || "Agent")).child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(label));
         }))
         .children(providerNames.map((name, i) => {
@@ -457,13 +460,13 @@ export default class MagpieLive extends View {
           const title = request.providerName || name;
           const models = [...new Set(active.filter((item) => current(item) && provider(item) === name).map(actualModel))];
           const label = models.length ? `${title} · ${models.join("、")}` : title;
-          return h_flex().absolute().right(14).top(nodeY(providerNames, i) - nodeHeight / 2).w(82).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(t.border).bg(t.surface).tooltip(label)
+          return h_flex().absolute().left(edge).top(providerY(i) - nodeHeight / 2).w(stageWidth - edge - 12).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(t.border).bg(t.surface).tooltip(label)
             .child(icon(name)).child(v_flex().flex_1().min_w(0).gap(1)
               .child(h_flex().gap(3).items_center().child(div().size(5).rounded_full().flex_none().bg(active.some((item) => provider(item) === name) ? t.working : t.done))
                 .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(title)))
               .when(models.length > 0, row => row.child(div().min_w(0).truncate().text_size(8).text_color(t.dim).child(models.join("、")))));
         }))
-        .child(div().absolute().left(middle - 15).top((stageHeight - hubHeight) / 2).w(30).h(hubHeight).rounded_full().border(1).border_color(t.border).bg(t.surface).flex().items_center().justify_center()
+        .child(div().absolute().left(middle - 15).top(hubY - hubHeight / 2).w(30).h(hubHeight).rounded_full().border(1).border_color(t.border).bg(t.surface).flex().items_center().justify_center()
           .child(svg("mods/magpie-live/magpie.svg").size(17).text_color(t.muted)));
       const activeRows = active.map((request, i) => {
         const latest = this.routes[request.session];
