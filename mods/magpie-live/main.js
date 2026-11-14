@@ -463,8 +463,8 @@ export default class MagpieLive extends View {
         const route = latest && String(latest.id) === String(request.route_id) ? latest : null;
         const reason = route?.rule?.when?.length ? route.rule.when.join(" · ") : route ? "网关未提供命中原因" : "等待路由决策";
         const title = current(request) && focusedAgent?.title ? focusedAgent.title : `${request.agent || "Agent"} · ${request.session ? request.session.slice(-6) : "会话未知"}`;
-        return v_flex().id(`route-decision-${i}`).gap(3).p(6).rounded(5).bg(current(request) ? t.selected : t.raised)
-          .when(current(request), row => row.border_l(2).border_color(t.accent))
+        return v_flex().id(`route-decision-${i}`).gap(3).p(6).rounded(5).bg(current(request) ? t.selected : t.surface)
+          .when(current(request), row => row.border(1).border_color(t.border))
           .child(h_flex().gap(5).items_center().child(div().size(6).rounded_full().bg(sessionColor(request))).child(icon(request.agent || "Agent"))
             .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).font_semibold().tooltip(title).child(title))
             .when(current(request), row => row.child(text("当前会话", t.accent, 9).font_semibold())))
