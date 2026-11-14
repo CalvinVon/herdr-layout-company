@@ -140,11 +140,12 @@ export default class MagpieLive extends View {
         if (pid && !String(focusTerminal).includes("/")) {
           try {
             const files = await exec("/usr/sbin/lsof", ["-Fn", "-p", String(pid)]);
-            const ids = [...new Set(files.stdout.split("\n").flatMap((line) => {
-              const match = line.match(/\/session-owners\/([0-9a-f-]{36})\.lock$/i) || line.match(/\/sessions\/.*?([0-9a-f-]{36})\.jsonl$/i);
-              return match ? [match[1]] : [];
-            }))];
-            if (ids.length === 1) this.focusSession = ids[0];
+            const lines = files.stdout.split("\n");
+            const ids = (pattern) => [...new Set(lines.flatMap((line) => { const match = line.match(pattern); return match ? [match[1]] : []; }))];
+            const sessions = ids(/\/sessions\/.*?([0-9a-f-]{36})\.jsonl$/i);
+            const owners = ids(/\/session-owners\/([0-9a-f-]{36})\.lock$/i);
+            if (sessions.length === 1) this.focusSession = sessions[0];
+            else if (!sessions.length && owners.length === 1) this.focusSession = owners[0];
           } catch { /* The terminal may not expose a session file. */ }
         }
         if (!this.recentReading) {
@@ -463,9 +464,10 @@ export default class MagpieLive extends View {
         const reason = route?.rule?.when?.length ? route.rule.when.join(" · ") : route ? "网关未提供命中原因" : "等待路由决策";
         const title = current(request) && focusedAgent?.title ? focusedAgent.title : `${request.agent || "Agent"} · ${request.session ? request.session.slice(-6) : "会话未知"}`;
         return v_flex().id(`route-decision-${i}`).gap(3).p(6).rounded(5).bg(current(request) ? t.selected : t.raised)
+          .when(current(request), row => row.border_l(2).border_color(t.accent))
           .child(h_flex().gap(5).items_center().child(div().size(6).rounded_full().bg(sessionColor(request))).child(icon(request.agent || "Agent"))
             .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).font_semibold().tooltip(title).child(title))
-            .when(current(request), row => row.child(text("当前", t.accent, 9))))
+            .when(current(request), row => row.child(text("当前会话", t.accent, 9).font_semibold())))
           .child(h_flex().gap(4).items_center()
             .child(div().min_w(0).truncate().text_size(11).text_color(t.accent).font_semibold().tooltip(actualModel(request)).child(actualModel(request)))
             .when(Boolean(route?.group), row => row.child(text(`（${this.groupNames[route.group] || route.group}）`, t.muted, 10))))
