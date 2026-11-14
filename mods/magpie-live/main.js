@@ -377,17 +377,17 @@ export default class MagpieLive extends View {
       const status = (request) => request.live ? "正在回答" : request.status >= 400 ? `失败 ${request.status}` : request.status ? `${request.status}` : "状态未知";
       const provider = (request) => request.provider || request.providerName || "未知来源";
       const sessionKey = (request) => request.session || `request-${request.route_id ?? request.id}`;
-      const sourceKey = (request) => request.session || `unknown-${request.agent || "Agent"}`;
+      const sourceKey = (request) => request.agent || "Agent";
       const actualModel = (request) => {
         const route = request.live ? this.routes[request.session] : null;
         const attempt = route && String(route.id) === String(request.route_id) ? route.tries?.[route.tries.length - 1] : null;
         return request.served || attempt?.model || (!request.live ? request.model : null) || "等待模型";
       };
-      const sourceNames = [...new Set(requests.map(sourceKey))].slice(0, 4);
-      const providerNames = [...new Set(requests.map(provider))].slice(0, 4);
+      const sourceNames = [...new Set(active.map(sourceKey))];
+      const providerNames = [...new Set(active.map(provider))];
       const stageWidth = Math.max(200, Math.min(260, this.width - 20));
-      const edge = 48;
-      const middle = 25;
+      const edge = 96;
+      const middle = stageWidth / 2;
       const sessionColor = (request) => {
         const key = sessionKey(request);
         if (!this.sessionColors.has(key)) {
@@ -400,21 +400,13 @@ export default class MagpieLive extends View {
         }
         return this.sessionColors.get(key);
       };
-      const seenFlows = new Set();
-      const flows = active.filter((request) => {
-        const key = `${sessionKey(request)}|${provider(request)}`;
-        if (seenFlows.has(key) || !sourceNames.includes(sourceKey(request)) || !providerNames.includes(provider(request))) return false;
-        seenFlows.add(key);
-        return true;
-      }).sort((a, b) => sourceNames.indexOf(sourceKey(a)) - sourceNames.indexOf(sourceKey(b)));
+      const flows = active;
       const nodeHeight = 34;
       const totalHeight = (names) => names.length * nodeHeight + Math.max(0, names.length - 1) * 10;
+      const stageHeight = Math.max(110, totalHeight(sourceNames) + 22, totalHeight(providerNames) + 22);
+      const nodeY = (names, index) => (stageHeight - totalHeight(names)) / 2 + index * (nodeHeight + 10) + nodeHeight / 2;
+      const hubY = stageHeight / 2;
       const hubHeight = 30;
-      const hubY = 12 + totalHeight(sourceNames) + 20 + hubHeight / 2;
-      const stageHeight = hubY + hubHeight / 2 + 20 + totalHeight(providerNames) + 12;
-      const nodeY = (names, index, top) => top + index * (nodeHeight + 10) + nodeHeight / 2;
-      const sourceY = (index) => nodeY(sourceNames, index, 12);
-      const providerY = (index) => nodeY(providerNames, index, hubY + hubHeight / 2 + 20);
       const line = (x1, y1, x2, y2, color) => {
         const dx = x2 - x1;
         const path = PathBuilder.stroke(1).move_to(x1, y1).cubic_bezier_to(x2, y2, x1 + dx * 0.45, y1, x2 - dx * 0.35, y2).build();
@@ -431,43 +423,46 @@ export default class MagpieLive extends View {
       };
       this.motionWidth = stageWidth;
       this.motionHeight = stageHeight;
-      this.motionPaths = flows.map((request) => ({
-        id: `flow-${sessionKey(request)}-${provider(request)}`,
+      this.motionPaths = flows.map((request, i) => ({
+        id: `flow-${request.route_id ?? i}-${i}`,
         fromX: edge,
-        fromY: sourceY(sourceNames.indexOf(sourceKey(request))),
+        fromY: nodeY(sourceNames, sourceNames.indexOf(sourceKey(request))),
         middle,
         midLeftY: hubY,
         midRightY: hubY,
-        toX: edge,
-        toY: providerY(providerNames.indexOf(provider(request))),
+        toX: stageWidth - edge,
+        toY: nodeY(providerNames, providerNames.indexOf(provider(request))),
         color: sessionColor(request),
         current: current(request),
         dimmed: currentActive && !current(request),
       }));
       const graph = div().relative().w(stageWidth).h(stageHeight).rounded(8).border(1).border_color(t.border).bg(t.surface)
-        .children(sourceNames.map((name, i) => line(edge, sourceY(i), middle, hubY, active.some((request) => sourceKey(request) === name) ? t.muted : t.border)))
-        .children(providerNames.map((name, i) => line(middle, hubY, edge, providerY(i), active.some((request) => provider(request) === name) ? t.muted : t.border)))
+        .children(sourceNames.map((name, i) => line(edge, nodeY(sourceNames, i), middle, hubY, t.muted)))
+        .children(providerNames.map((name, i) => line(middle, hubY, stageWidth - edge, nodeY(providerNames, i), t.muted)))
         .child(this.motionView)
-        .children(sourceNames.map((name, i) => {
-          const request = requests.find((item) => sourceKey(item) === name);
-          const label = current(request) && focusedAgent?.title ? focusedAgent.title : request.session ? `会话 ${request.session.slice(-6)}` : "会话未知";
-          const isCurrent = active.some((item) => sourceKey(item) === name && current(item));
-          return h_flex().absolute().left(edge).top(sourceY(i) - nodeHeight / 2).w(stageWidth - edge - 12).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(isCurrent ? t.accent : t.border).bg(t.surface).tooltip(label)
-            .child(icon(request.agent || "Agent")).child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(label));
-        }))
+        .children(sourceNames.map((name, i) => h_flex().absolute().left(14).top(nodeY(sourceNames, i) - nodeHeight / 2).w(82).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(t.border).bg(t.surface).tooltip(name)
+          .child(icon(name)).child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(name))))
         .children(providerNames.map((name, i) => {
-          const request = requests.find((item) => provider(item) === name);
+          const request = active.find((item) => provider(item) === name);
           const title = request.providerName || name;
-          const models = [...new Set(active.filter((item) => current(item) && provider(item) === name).map(actualModel))];
-          const label = models.length ? `${title} · ${models.join("、")}` : title;
-          return h_flex().absolute().left(edge).top(providerY(i) - nodeHeight / 2).w(stageWidth - edge - 12).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(t.border).bg(t.surface).tooltip(label)
-            .child(icon(name)).child(v_flex().flex_1().min_w(0).gap(1)
-              .child(h_flex().gap(3).items_center().child(div().size(5).rounded_full().flex_none().bg(active.some((item) => provider(item) === name) ? t.working : t.done))
-                .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(title)))
-              .when(models.length > 0, row => row.child(div().min_w(0).truncate().text_size(8).text_color(t.dim).child(models.join("、")))));
+          return h_flex().absolute().right(14).top(nodeY(providerNames, i) - nodeHeight / 2).w(82).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(t.border).bg(t.surface).tooltip(title)
+            .child(icon(name)).child(div().size(5).rounded_full().flex_none().bg(t.working))
+            .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(title));
         }))
+        .when(!active.length, view => view.child(div().absolute().left(0).right(0).top(12).flex().justify_center().child(text("当前没有活动路由", t.dim, 10))))
         .child(div().absolute().left(middle - 15).top(hubY - hubHeight / 2).w(30).h(hubHeight).rounded_full().border(1).border_color(t.border).bg(t.surface).flex().items_center().justify_center()
           .child(svg("mods/magpie-live/magpie.svg").size(17).text_color(t.muted)));
+      const currentRoutes = active.filter(current);
+      const currentRoute = v_flex().id("current-live-route").gap(5).p(8).rounded(6).border(1).border_color(t.border).bg(t.raised)
+        .child(h_flex().justify_between().items_center()
+          .child(text("当前会话的实时路由", t.foreground, 10).font_semibold())
+          .when(currentRoutes.length > 0, row => row.child(text("正在回答", t.working, 9))))
+        .when(!currentSession, view => view.child(text("无法识别当前会话", t.dim, 10)))
+        .when(Boolean(currentSession) && !currentRoutes.length, view => view.child(text("当前会话暂无进行中的请求", t.dim, 10)))
+        .when(currentRoutes.length > 0 && Boolean(focusedAgent?.title), view => view.child(div().w_full().truncate().text_size(10).text_color(t.muted).tooltip(focusedAgent.title).child(focusedAgent.title)))
+        .children(currentRoutes.map((request) => v_flex().gap(3)
+          .child(text(`${sourceKey(request)} → Magpie → ${request.providerName || provider(request)}`, t.foreground, 10))
+          .child(text(`实际路由模型 · ${actualModel(request)}`, t.muted, 10))));
       const activeRows = active.map((request, i) => {
         const latest = this.routes[request.session];
         const route = latest && String(latest.id) === String(request.route_id) ? latest : null;
@@ -518,7 +513,7 @@ export default class MagpieLive extends View {
             .when(!route, detail => detail.child(text("此历史请求的详细尝试不可用", t.dim, 9)))));
       });
       const sections = [
-        { id: "graph", name: "路由图", view: () => div().flex().justify_center().child(graph) },
+        { id: "graph", name: "全部活动路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(8).child(div().flex().justify_center().child(graph)).child(currentRoute) },
         { id: "quotas", name: "来源额度", extra: () => div().id("quota-manage").cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.editQuotas = !this.editQuotas; next.notify(); }).child(this.editQuotas ? "完成" : "隐藏 / 显示"),
           view: () => div().id("provider-quota-list").w_full().child(this.providerQuotas(t)) },
         { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageOverview(t) },
