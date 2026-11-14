@@ -390,7 +390,7 @@ export default class MagpieLive extends View {
       const sourceNames = [...new Set(active.map(sourceKey))];
       const providerNames = [...new Set(active.map(provider))];
       const stageWidth = Math.max(200, Math.min(260, this.width - 20));
-      const edge = 96;
+      const edge = 90;
       const middle = stageWidth / 2;
       const sessionColor = (request) => {
         const key = sessionKey(request);
@@ -405,12 +405,12 @@ export default class MagpieLive extends View {
         return this.sessionColors.get(key);
       };
       const flows = active;
-      const nodeHeight = 34;
-      const totalHeight = (names) => names.length * nodeHeight + Math.max(0, names.length - 1) * 10;
-      const stageHeight = Math.max(110, totalHeight(sourceNames) + 22, totalHeight(providerNames) + 22);
-      const nodeY = (names, index) => (stageHeight - totalHeight(names)) / 2 + index * (nodeHeight + 10) + nodeHeight / 2;
+      const nodeHeight = 24;
+      const totalHeight = (names) => names.length * nodeHeight + Math.max(0, names.length - 1) * 8;
+      const stageHeight = Math.max(86, totalHeight(sourceNames) + 16, totalHeight(providerNames) + 16);
+      const nodeY = (names, index) => (stageHeight - totalHeight(names)) / 2 + index * (nodeHeight + 8) + nodeHeight / 2;
       const hubY = stageHeight / 2;
-      const hubHeight = 30;
+      const hubHeight = 24;
       const line = (x1, y1, x2, y2, color) => {
         const dx = x2 - x1;
         const path = PathBuilder.stroke(1).move_to(x1, y1).cubic_bezier_to(x2, y2, x1 + dx * 0.45, y1, x2 - dx * 0.35, y2).build();
@@ -444,17 +444,17 @@ export default class MagpieLive extends View {
         .children(sourceNames.map((name, i) => line(edge, nodeY(sourceNames, i), middle, hubY, t.muted)))
         .children(providerNames.map((name, i) => line(middle, hubY, stageWidth - edge, nodeY(providerNames, i), t.muted)))
         .child(this.motionView)
-        .children(sourceNames.map((name, i) => h_flex().absolute().left(14).top(nodeY(sourceNames, i) - nodeHeight / 2).w(82).h(nodeHeight).px(5).gap(3).items_center().rounded(5).bg(t.raised).tooltip(name)
+        .children(sourceNames.map((name, i) => h_flex().absolute().left(14).top(nodeY(sourceNames, i) - nodeHeight / 2).w(76).h(nodeHeight).px(5).gap(3).items_center().rounded(4).bg(t.raised).tooltip(name)
           .child(icon(name)).child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(name))))
         .children(providerNames.map((name, i) => {
           const request = active.find((item) => provider(item) === name);
           const title = request.providerName || name;
-          return h_flex().absolute().right(14).top(nodeY(providerNames, i) - nodeHeight / 2).w(82).h(nodeHeight).px(5).gap(3).items_center().rounded(5).bg(t.raised).tooltip(title)
+          return h_flex().absolute().right(14).top(nodeY(providerNames, i) - nodeHeight / 2).w(76).h(nodeHeight).px(5).gap(3).items_center().rounded(4).bg(t.raised).tooltip(title)
             .child(icon(name)).child(div().size(5).rounded_full().flex_none().bg(t.working))
             .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(title));
         }))
         .when(!active.length, view => view.child(div().absolute().left(0).right(0).top(12).flex().justify_center().child(text("当前没有活动路由", t.dim, 10))))
-        .child(div().absolute().left(middle - 15).top(hubY - hubHeight / 2).w(30).h(hubHeight).rounded_full().bg(t.surface).flex().items_center().justify_center()
+        .child(div().absolute().left(middle - hubHeight / 2).top(hubY - hubHeight / 2).w(hubHeight).h(hubHeight).rounded_full().bg(t.surface).flex().items_center().justify_center()
           .child(svg("mods/magpie-live/magpie.svg").size(17).text_color(t.muted)));
       const currentRoutes = active.filter(current);
       const activeRows = [...currentRoutes, ...active.filter((request) => !current(request))].map((request, i) => {
@@ -462,7 +462,7 @@ export default class MagpieLive extends View {
         const route = latest && String(latest.id) === String(request.route_id) ? latest : null;
         const reason = route?.rule?.when?.length ? route.rule.when.join(" · ") : route ? "网关未提供命中原因" : "等待路由决策";
         const title = current(request) && focusedAgent?.title ? focusedAgent.title : `${request.agent || "Agent"} · ${request.session ? request.session.slice(-6) : "会话未知"}`;
-        return v_flex().id(`route-decision-${i}`).gap(4).p(8).rounded(6).bg(current(request) ? t.selected : t.raised)
+        return v_flex().id(`route-decision-${i}`).gap(3).p(6).rounded(5).bg(current(request) ? t.selected : t.raised)
           .child(h_flex().gap(5).items_center().child(div().size(6).rounded_full().bg(sessionColor(request))).child(icon(request.agent || "Agent"))
             .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).font_semibold().tooltip(title).child(title))
             .when(current(request), row => row.child(text("当前", t.accent, 9))))
@@ -527,7 +527,7 @@ export default class MagpieLive extends View {
       const sectionView = (id) => {
         const section = sections.find((item) => item.id === id);
         const fixed = this.pinnedSections.includes(id);
-        return v_flex().id(`overview-section-${id}`).relative().p(8).border_b(1).border_color(t.border).bg(t.surface)
+        return v_flex().id(`overview-section-${id}`).relative().p(6).border_b(1).border_color(t.border).bg(t.surface)
           .when(this.draggingSection, card => card.cursor_grabbing())
           .on_hover((hovered, next) => { const current = hovered ? id : this.hoveredSection === id ? null : this.hoveredSection; if (current !== this.hoveredSection) { this.hoveredSection = current; next.notify(); } })
           .when(this.draggingSection && this.pressedSection === id, card => card.opacity(0.5))
