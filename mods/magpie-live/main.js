@@ -463,8 +463,7 @@ export default class MagpieLive extends View {
             .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).font_semibold().tooltip(title).child(title))
             .when(current(request), row => row.child(text("当前", t.accent, 9))))
           .when(Boolean(route?.group), row => row.child(text(`路由组 · ${route.group}`, t.muted, 10)))
-          .child(text(`${sourceKey(request)} → Magpie → ${request.providerName || provider(request)}`, t.foreground, 10))
-          .child(text(`实际路由模型 · ${actualModel(request)}`, t.muted, 10))
+          .child(h_flex().gap(4).items_center().child(text("实际路由模型 ·", t.muted, 10)).child(text(actualModel(request), t.accent, 11).font_semibold()))
           .child(text(`原因 · ${reason}`, t.muted, 10))
           .child(text(`回答中 · ${((request.ms || 0) / 1000).toFixed(1)} 秒`, t.working, 9));
       });
