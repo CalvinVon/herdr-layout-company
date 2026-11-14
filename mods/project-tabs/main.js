@@ -49,7 +49,8 @@ export default class Tabs extends View {
   }
 
   syncEditor(space, panel, body, cx) {
-    if (shared("layout") !== "office" || !space || this.pending) return;
+    const layoutName = shared("layout");
+    if (!["office", "agent-columns"].includes(layoutName) || !space || this.pending) return;
     const root = layout(), slot = find(root, "editor");
     if (!slot) return;
     const records = terminals();
@@ -71,17 +72,16 @@ export default class Tabs extends View {
       cx.spawn(async cx => {
         let notify = false;
         try {
-          const path = `${appHome()}/layouts/office.json`;
+          const path = `${appHome()}/layouts/${layoutName}.json`;
           const original = await readTextFile(path);
           const current = spaces().find(s => s.active);
-          if (shared("layout") !== "office" || current?.id !== space.id) { notify = true; return; }
-          if (original === null) throw new Error("office.json is missing");
+          if (shared("layout") !== layoutName || current?.id !== space.id) { notify = true; return; }
+          if (original === null) throw new Error(`${layoutName}.json is missing`);
           const tree = JSON.parse(original), editor = find(tree, "editor");
-          if (!editor) throw new Error("Editor slot is missing from office.json");
+          if (!editor) throw new Error(`Editor slot is missing from ${layoutName}.json`);
           if (JSON.stringify(editor.content) === JSON.stringify(content)) return;
           editor.content = content;
-          const updated = original.replace(/("id"\s*:\s*"editor"\s*,\s*"type"\s*:\s*"block"\s*,\s*"content"\s*:\s*)\{[\s\S]*?\}(\s*\n[ \t]*\})/, (_match, prefix, suffix) => prefix + JSON.stringify(content) + suffix);
-          if (updated === original || JSON.stringify(JSON.parse(updated)) !== JSON.stringify(tree)) throw new Error("Cannot safely update the Editor slot in office.json");
+          const updated = JSON.stringify(tree, null, 2) + "\n";
           await writeTextFile(path, updated, original);
           notify = true;
         } catch (error) {
@@ -161,7 +161,8 @@ export default class Tabs extends View {
       ? Math.max(10, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
       : 10;
     const panel = find(root, "panel"), body = find(root, "panel-body");
-    const enabled = shared("layout") === "office" ? [...(shared("workspace.panels") ?? ["files", "changes"]), "editor"] : (shared("workspace.panels") ?? ["files", "changes"]);
+    const visiblePanels = shared("workspace.panels") ?? ["files", "changes"];
+    const enabled = ["office", "agent-columns"].includes(shared("layout")) ? [...visiblePanels, "editor"] : visiblePanels;
     this.syncPanel(space, panel, body, enabled);
     this.syncEditor(space, panel, body, cx);
     const panelButton = (id, label, icon) => {
@@ -184,7 +185,7 @@ export default class Tabs extends View {
         : { mod: "space-folders", kind: "dialog", width: 560, height: 500 })))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
-      .when(shared("layout") === "office", el => el.child(panelButton("editor", this.editorLayoutError ? "Editor !" : "Editor", "mods/files/file.svg")))
+      .when(["office", "agent-columns"].includes(shared("layout")), el => el.child(panelButton("editor", this.editorLayoutError ? "Editor !" : "Editor", "mods/files/file.svg")))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/project-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/project-tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
         .child(button("close-window", w.platform === "windows" ? svg("mods/project-tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
