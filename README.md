@@ -1,6 +1,6 @@
 # Herdr Layout Company
 
-Herdr App 的 `office` 布局快照，包含布局、预览图、主题和所需 mod。
+Herdr App 的 `office` 和 `agent-columns` 布局快照，包含布局、预览图、主题和所需 mod。`agent-columns` 与 `office` 共用侧栏、顶部标签栏、Files、Editor 和 Magpie 窗格，省略办公室场景。
 
 布局包含 Magpie 窗格，可通过顶部 Magpie 图标显示或隐藏。窗格连接本机 Magpie 网关，展示路由、额度和用量；总览随浅色或深色主题调整样式，区块可拖动手柄排序、固定或隐藏，已隐藏区块可从顶部恢复；额度卡片可排序、隐藏，设置保存在本地。
 
