@@ -73,6 +73,7 @@ export default class MagpieLive extends View {
     this.active = [];
     this.routes = {};
     this.recent = [];
+    this.groupNames = {};
     this.recentReading = false;
     this.recentError = "";
     this.selectedRoute = null;
@@ -124,6 +125,9 @@ export default class MagpieLive extends View {
         }
         const configDir = this.configDir;
         const settingsText = await readTextFile(`${configDir}/settings.json`);
+        const providersText = await readTextFile(`${configDir}/providers.json`);
+        const groups = providersText ? (JSON.parse(providersText).groups ?? []) : [];
+        this.groupNames = Object.fromEntries(groups.map((group) => [group.id, group.name || group.id]));
         const port = Number(settingsText ? (JSON.parse(settingsText).port ?? 3425) : 3425);
         if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Magpie 网关端口无效");
         this.base = `http://127.0.0.1:${port}`;
@@ -462,7 +466,7 @@ export default class MagpieLive extends View {
           .child(h_flex().gap(5).items_center().child(div().size(6).rounded_full().bg(sessionColor(request))).child(icon(request.agent || "Agent"))
             .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).font_semibold().tooltip(title).child(title))
             .when(current(request), row => row.child(text("当前", t.accent, 9))))
-          .when(Boolean(route?.group), row => row.child(text(`路由组 · ${route.group}`, t.muted, 10)))
+          .when(Boolean(route?.group), row => row.child(text(`路由组 · ${this.groupNames[route.group] || route.group}`, t.muted, 10)))
           .child(h_flex().gap(4).items_center().child(text("实际路由模型 ·", t.muted, 10)).child(text(actualModel(request), t.accent, 11).font_semibold()))
           .child(text(`原因 · ${reason}`, t.muted, 10))
           .child(text(`回答中 · ${((request.ms || 0) / 1000).toFixed(1)} 秒`, t.working, 9));
@@ -498,7 +502,7 @@ export default class MagpieLive extends View {
             .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.muted).child(`${provider(request)}${account} · ${request.live ? status(request) : request.served || request.model || status(request)}`)))
           .when(Boolean(metrics), row => row.child(h_flex().justify_end().child(text(metrics, t.dim, 9))))
           .when(expanded, row => row.child(v_flex().gap(4).pt(5).border_t(1).border_color(t.border)
-            .when(Boolean(route?.group), detail => detail.child(text(`路由组 · ${route.group}`, t.muted, 10)))
+            .when(Boolean(route?.group), detail => detail.child(text(`路由组 · ${this.groupNames[route.group] || route.group}`, t.muted, 10)))
             .children((route?.tries ?? []).map((attempt, n) => text(`尝试 ${n + 1} · ${attempt.model || "未知模型"} · ${attempt.done ? attempt.status || "已结束" : "进行中"}${attempt.ms != null ? ` · ${(attempt.ms / 1000).toFixed(1)} 秒` : ""}`, attempt.status >= 400 ? t.blocked : t.muted, 10)))
             .when(!route, detail => detail.child(text("此历史请求的详细尝试不可用", t.dim, 9)))));
       });
