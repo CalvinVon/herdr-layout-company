@@ -521,15 +521,52 @@ export default class MagpieLive extends View {
         const move = (direction, next) => { const updated = [...order]; [updated[i], updated[i + direction]] = [updated[i + direction], updated[i]]; this.overviewOrder = updated; localStorage.setItem("magpie-live.overview-order", JSON.stringify(updated)); next.notify(); };
         return h_flex().items_center().gap(8).p(6).rounded(5).bg(t.raised)
           .child(div().flex_1().text_size(10).text_color(t.foreground).child(section.name))
-          .child(div().id(`overview-pin-${id}`).cursor_pointer().text_size(10).text_color(this.pinnedSections.includes(id) ? t.accent : t.muted).on_click((_e, next) => { this.pinnedSections = this.pinnedSections.includes(id) ? this.pinnedSections.filter((item) => item !== id) : [...this.pinnedSections, id]; localStorage.setItem("magpie-live.pinned-sections", JSON.stringify(this.pinnedSections)); next.notify(); }).child(this.pinnedSections.includes(id) ? "取消固定" : "固定"))
           .when(i > 0, row => row.child(div().id(`overview-up-${id}`).cursor_pointer().text_color(t.muted).on_click((_e, next) => move(-1, next)).child("↑")))
           .when(i < order.length - 1, row => row.child(div().id(`overview-down-${id}`).cursor_pointer().text_color(t.muted).on_click((_e, next) => move(1, next)).child("↓")))
           .child(div().id(`overview-visibility-${id}`).cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.hiddenSections = hidden ? this.hiddenSections.filter((item) => item !== id) : [...this.hiddenSections, id]; localStorage.setItem("magpie-live.hidden-sections", JSON.stringify(this.hiddenSections)); next.notify(); }).child(hidden ? "显示" : "隐藏"));
       }));
-      const sectionView = (id) => div().id(`overview-section-${id}`).p(8).rounded(8).border(1).border_color(t.border).bg(t.surface).hover(style => style.border_color(t.muted)).child(sections.find((item) => item.id === id).view());
+      const sectionView = (id) => {
+        const fixed = this.pinnedSections.includes(id);
+        return v_flex().id(`overview-section-${id}`).relative().p(8).rounded(8).border(1).border_color(t.border).bg(t.surface)
+          .hover(style => style.border_color(t.muted))
+          .when(this.draggingSection && this.pressedSection === id, card => card.opacity(0.5))
+          .when(this.draggingSection && this.overSection === id && this.pressedSection !== id, card => card.child(div().absolute().left(4).right(4).when(this.dropSectionAfter, line => line.bottom(0)).when(!this.dropSectionAfter, line => line.top(0)).h(2).bg(t.accent)))
+          .on_mouse_move((event, next) => {
+            if (!this.pressedSection) return;
+            const dragging = this.draggingSection || Math.hypot(event.position.x - this.sectionPressPosition.x, event.position.y - this.sectionPressPosition.y) >= 5;
+            const over = dragging ? id : null, after = event.local_position.y >= event.bounds.height / 2;
+            if (dragging !== this.draggingSection || over !== this.overSection || after !== this.dropSectionAfter) { this.draggingSection = dragging; this.overSection = over; this.dropSectionAfter = after; next.notify(); }
+          })
+          .on_mouse_up("left", (_event, next) => {
+            if (!this.pressedSection) return;
+            const from = this.pressedSection, over = this.overSection, after = this.dropSectionAfter, dragging = this.draggingSection;
+            this.pressedSection = null; this.overSection = null; this.draggingSection = false;
+            if (dragging && over === id && from !== id) {
+              const updated = order.filter((item) => item !== from), index = updated.indexOf(id);
+              updated.splice(index + (after ? 1 : 0), 0, from);
+              this.overviewOrder = updated;
+              localStorage.setItem("magpie-live.overview-order", JSON.stringify(updated));
+              this.pinnedSections = fixed ? [...new Set([...this.pinnedSections, from])] : this.pinnedSections.filter((item) => item !== from);
+              localStorage.setItem("magpie-live.pinned-sections", JSON.stringify(this.pinnedSections));
+              next.stop_propagation();
+            }
+            next.notify();
+          })
+          .child(h_flex().justify_between().items_center()
+            .child(div().id(`overview-drag-${id}`).size(18).flex().items_center().justify_center().cursor_grab().text_color(t.dim).tooltip("拖动排序").role("button").accessibility_label(`拖动${sections.find((item) => item.id === id).name}排序`)
+              .on_mouse_down("left", (event, next) => { next.stop_propagation(); this.pressedSection = id; this.sectionPressPosition = event.position; this.overSection = null; this.draggingSection = false; })
+              .on_click((_event, next) => next.stop_propagation()).child("⋮⋮"))
+            .child(div().id(`overview-pin-${id}`).size(18).flex().items_center().justify_center().rounded(4).cursor_pointer().text_color(fixed ? t.accent : t.dim).hover(style => style.bg(t.hover).text_color(t.foreground)).tooltip(fixed ? "取消固定" : "固定到顶部")
+              .on_mouse_down("left", (_event, next) => next.stop_propagation())
+              .on_click((_event, next) => { next.stop_propagation(); this.pinnedSections = fixed ? this.pinnedSections.filter((item) => item !== id) : [...this.pinnedSections, id]; localStorage.setItem("magpie-live.pinned-sections", JSON.stringify(this.pinnedSections)); next.notify(); })
+              .child(svg("mods/workspace-chrome-personal/pin.svg").size(12))))
+          .child(sections.find((item) => item.id === id).view());
+      };
       const visible = order.filter((id) => !this.hiddenSections.includes(id));
       const pinned = visible.filter((id) => this.pinnedSections.includes(id));
       return v_flex().id("magpie-live-root").size_full().min_h(0).bg(t.surface)
+        .on_hover((hovered, next) => { if (!hovered && this.pressedSection) { this.pressedSection = null; this.overSection = null; this.draggingSection = false; next.notify(); } })
+        .on_mouse_up("left", (_event, next) => { if (this.pressedSection) { this.pressedSection = null; this.overSection = null; this.draggingSection = false; next.notify(); } })
         .on_size_change((size, next) => { if (this.width !== size.width || this.height !== size.height) { this.width = size.width; this.height = size.height; next.notify(); } })
         .child(header)
         .child(h_flex().justify_between().items_center().px(10).py(7)
