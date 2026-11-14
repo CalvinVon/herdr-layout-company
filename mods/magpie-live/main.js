@@ -453,27 +453,18 @@ export default class MagpieLive extends View {
         .child(div().absolute().left(middle - 15).top(hubY - hubHeight / 2).w(30).h(hubHeight).rounded_full().border(1).border_color(t.border).bg(t.surface).flex().items_center().justify_center()
           .child(svg("mods/magpie-live/magpie.svg").size(17).text_color(t.muted)));
       const currentRoutes = active.filter(current);
-      const currentRoute = v_flex().id("current-live-route").gap(5).p(8).rounded(6).border(1).border_color(t.border).bg(t.raised)
-        .child(h_flex().justify_between().items_center()
-          .child(text("当前会话的实时路由", t.foreground, 10).font_semibold())
-          .when(currentRoutes.length > 0, row => row.child(text("正在回答", t.working, 9))))
-        .when(!currentSession, view => view.child(text("无法识别当前会话", t.dim, 10)))
-        .when(Boolean(currentSession) && !currentRoutes.length, view => view.child(text("当前会话暂无进行中的请求", t.dim, 10)))
-        .when(currentRoutes.length > 0 && Boolean(focusedAgent?.title), view => view.child(div().w_full().truncate().text_size(10).text_color(t.muted).tooltip(focusedAgent.title).child(focusedAgent.title)))
-        .children(currentRoutes.map((request) => v_flex().gap(3)
-          .child(text(`${sourceKey(request)} → Magpie → ${request.providerName || provider(request)}`, t.foreground, 10))
-          .child(text(`实际路由模型 · ${actualModel(request)}`, t.muted, 10))));
-      const activeRows = active.map((request, i) => {
+      const activeRows = [...currentRoutes, ...active.filter((request) => !current(request))].map((request, i) => {
         const latest = this.routes[request.session];
         const route = latest && String(latest.id) === String(request.route_id) ? latest : null;
-        const attempt = route?.tries?.[route.tries.length - 1];
         const reason = route?.rule?.when?.length ? route.rule.when.join(" · ") : route ? "网关未提供命中原因" : "等待路由决策";
+        const title = current(request) && focusedAgent?.title ? focusedAgent.title : `${request.agent || "Agent"} · ${request.session ? request.session.slice(-6) : "会话未知"}`;
         return v_flex().id(`route-decision-${i}`).gap(4).p(8).rounded(6).border(1).border_color(current(request) ? t.accent : t.border).bg(t.surface)
           .child(h_flex().gap(5).items_center().child(div().size(6).rounded_full().bg(sessionColor(request))).child(icon(request.agent || "Agent"))
-            .child(text(`${request.agent || "Agent"} · ${request.session ? request.session.slice(-6) : "会话未知"}`, t.foreground, 10).font_semibold())
-            .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.muted).child(route?.group ? `路由组 · ${route.group}` : request.req || "等待路由组"))
+            .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).font_semibold().tooltip(title).child(title))
             .when(current(request), row => row.child(text("当前", t.accent, 9))))
-          .child(text(`模型 · ${attempt?.model || route?.model || "等待选择"}`, t.foreground, 10))
+          .when(Boolean(route?.group), row => row.child(text(`路由组 · ${route.group}`, t.muted, 10)))
+          .child(text(`${sourceKey(request)} → Magpie → ${request.providerName || provider(request)}`, t.foreground, 10))
+          .child(text(`实际路由模型 · ${actualModel(request)}`, t.muted, 10))
           .child(text(`原因 · ${reason}`, t.muted, 10))
           .child(text(`回答中 · ${((request.ms || 0) / 1000).toFixed(1)} 秒`, t.working, 9));
       });
@@ -513,11 +504,14 @@ export default class MagpieLive extends View {
             .when(!route, detail => detail.child(text("此历史请求的详细尝试不可用", t.dim, 9)))));
       });
       const sections = [
-        { id: "graph", name: "全部活动路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(8).child(div().flex().justify_center().child(graph)).child(currentRoute) },
+        { id: "graph", name: "全部活动路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => div().flex().justify_center().child(graph) },
         { id: "quotas", name: "来源额度", extra: () => div().id("quota-manage").cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.editQuotas = !this.editQuotas; next.notify(); }).child(this.editQuotas ? "完成" : "隐藏 / 显示"),
           view: () => div().id("provider-quota-list").w_full().child(this.providerQuotas(t)) },
         { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageOverview(t) },
-        { id: "decisions", name: "实时路由决策", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(6).children(activeRows).when(!activeRows.length, body => body.child(text("当前没有进行中的请求", t.dim, 10))) },
+        { id: "decisions", name: "实时路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(6)
+          .when(!currentSession, body => body.child(text("无法识别当前会话", t.dim, 10)))
+          .when(Boolean(currentSession) && !currentRoutes.length, body => body.child(text("当前会话暂无进行中的请求", t.dim, 10)))
+          .children(activeRows) },
         { id: "session", name: currentSession ? "当前会话" : "最近会话", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10),
           view: () => v_flex().gap(4).p(8).rounded(6).bg(t.raised).child(text(sessionId ? `${session?.agent || focusedType || "Agent"} · ${sessionId.slice(-8)}` : "尚无会话", t.foreground, 10)).child(text(sessionMetrics, t.muted, 10)) },
         { id: "requests", name: `最近请求 · ${requests.length}`, extra: () => div().id("route-mask").text_size(10).text_color(t.muted).cursor_pointer()
