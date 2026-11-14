@@ -70,6 +70,7 @@ export default class MagpieLive extends View {
     this.historyAt = 0;
     this.width = 500;
     this.height = 600;
+    this.pinnedHeight = 0;
     this.active = [];
     this.routes = {};
     this.recent = [];
@@ -537,7 +538,8 @@ export default class MagpieLive extends View {
         .when(Boolean(this.error), body => body.child(card(t).child(text(`连接异常 · ${this.error}`, t.blocked))))
         .when(Boolean(this.recentError), body => body.child(text(`请求记录暂不可用 · ${this.recentError}`, t.blocked, 10)))
         .child(h_flex().justify_end().px(10).child(div().id("overview-manage").cursor_pointer().px(5).py(3).text_size(10).text_color(t.accent).on_click((_e, next) => { this.editOverview = !this.editOverview; next.notify(); }).child(this.editOverview ? "完成布局" : "管理总览")))
-        .when(pinned.length > 0, body => body.child(div().id("overview-pinned").max_h(Math.max(80, this.height * 0.4)).overflow_y_scrollbar().px(8).child(v_flex().gap(8).children(pinned.map(sectionView)))))
+        .when(pinned.length > 0, body => body.child(div().id("overview-pinned").flex_none().h(Math.min(this.pinnedHeight || Math.max(80, this.height * 0.4), Math.max(80, this.height * 0.4))).overflow_y_scrollbar().px(8)
+          .child(v_flex().id("overview-pinned-content").flex_none().gap(8).on_size_change((size, next) => { if (this.pinnedHeight !== size.height) { this.pinnedHeight = size.height; next.notify(); } }).children(pinned.map(sectionView)))))
         .child(div().flex_1().min_h(0).overflow_y_scrollbar().child(v_flex().gap(8).p(8)
           .when(this.editOverview, body => body.child(layoutEditor))
           .children(visible.filter((id) => !this.pinnedSections.includes(id)).map(sectionView))))
