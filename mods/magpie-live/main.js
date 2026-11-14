@@ -376,12 +376,18 @@ export default class MagpieLive extends View {
       const currentActive = active.some(current);
       const status = (request) => request.live ? "正在回答" : request.status >= 400 ? `失败 ${request.status}` : request.status ? `${request.status}` : "状态未知";
       const provider = (request) => request.provider || request.providerName || "未知来源";
-      const sourceNames = [...new Set([...(focusedType ? [focusedType] : []), ...requests.map((request) => request.agent || "Agent")])].slice(0, 4);
+      const sessionKey = (request) => request.session || `request-${request.route_id ?? request.id}`;
+      const sourceKey = (request) => request.session || `unknown-${request.agent || "Agent"}`;
+      const actualModel = (request) => {
+        const route = request.live ? this.routes[request.session] : null;
+        const attempt = route && String(route.id) === String(request.route_id) ? route.tries?.[route.tries.length - 1] : null;
+        return request.served || attempt?.model || (!request.live ? request.model : null) || "等待模型";
+      };
+      const sourceNames = [...new Set(requests.map(sourceKey))].slice(0, 4);
       const providerNames = [...new Set(requests.map(provider))].slice(0, 4);
       const stageWidth = Math.max(200, Math.min(260, this.width - 20));
       const edge = 96;
       const middle = stageWidth / 2;
-      const sessionKey = (request) => request.session || `request-${request.id}`;
       const sessionColor = (request) => {
         const key = sessionKey(request);
         if (!this.sessionColors.has(key)) {
@@ -396,12 +402,12 @@ export default class MagpieLive extends View {
       };
       const seenFlows = new Set();
       const flows = active.filter((request) => {
-        const key = `${sessionKey(request)}|${request.agent || "Agent"}|${provider(request)}`;
-        if (seenFlows.has(key) || !sourceNames.includes(request.agent || "Agent") || !providerNames.includes(provider(request))) return false;
+        const key = `${sessionKey(request)}|${provider(request)}`;
+        if (seenFlows.has(key) || !sourceNames.includes(sourceKey(request)) || !providerNames.includes(provider(request))) return false;
         seenFlows.add(key);
         return true;
-      }).sort((a, b) => sourceNames.indexOf(a.agent || "Agent") - sourceNames.indexOf(b.agent || "Agent") || sessionKey(a).localeCompare(sessionKey(b)));
-      const nodeHeight = 22;
+      }).sort((a, b) => sourceNames.indexOf(sourceKey(a)) - sourceNames.indexOf(sourceKey(b)));
+      const nodeHeight = 34;
       const totalHeight = (names) => names.length * nodeHeight + Math.max(0, names.length - 1) * 10;
       const stageHeight = Math.max(110, totalHeight(sourceNames) + 22, totalHeight(providerNames) + 22);
       const nodeY = (names, index) => (stageHeight - totalHeight(names)) / 2 + index * (nodeHeight + 10) + nodeHeight / 2;
@@ -423,9 +429,9 @@ export default class MagpieLive extends View {
       this.motionWidth = stageWidth;
       this.motionHeight = stageHeight;
       this.motionPaths = flows.map((request) => ({
-        id: `flow-${sessionKey(request)}-${request.agent || "Agent"}-${provider(request)}`,
+        id: `flow-${sessionKey(request)}-${provider(request)}`,
         fromX: edge,
-        fromY: nodeY(sourceNames, sourceNames.indexOf(request.agent || "Agent")),
+        fromY: nodeY(sourceNames, sourceNames.indexOf(sourceKey(request))),
         middle,
         midLeftY: stageHeight / 2,
         midRightY: stageHeight / 2,
@@ -436,16 +442,27 @@ export default class MagpieLive extends View {
         dimmed: currentActive && !current(request),
       }));
       const graph = div().relative().w(stageWidth).h(stageHeight).rounded(8).border(1).border_color(t.border).bg(t.surface)
-        .children(sourceNames.map((name, i) => requests.some((request) => (request.agent || "Agent") === name) ? line(edge, nodeY(sourceNames, i), middle, stageHeight / 2, active.some((request) => (request.agent || "Agent") === name) ? t.muted : t.border) : div()))
+        .children(sourceNames.map((name, i) => line(edge, nodeY(sourceNames, i), middle, stageHeight / 2, active.some((request) => sourceKey(request) === name) ? t.muted : t.border)))
         .children(providerNames.map((name, i) => line(middle, stageHeight / 2, stageWidth - edge, nodeY(providerNames, i), active.some((request) => provider(request) === name) ? t.muted : t.border)))
         .child(this.motionView)
-        .children(sourceNames.map((name, i) => h_flex().absolute().left(14).top(nodeY(sourceNames, i) - nodeHeight / 2).w(82).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(active.some((request) => (request.agent || "Agent") === name && current(request)) ? t.accent : t.border).bg(t.surface)
-          .child(icon(name)).child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(name))
-          .when(active.some((request) => (request.agent || "Agent") === name && current(request)), row => row.child(text("当前", t.accent, 9)))))
-        .children(providerNames.map((name, i) => h_flex().absolute().right(14).top(nodeY(providerNames, i) - nodeHeight / 2).w(82).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(t.border).bg(t.surface)
-          .child(icon(name)).child(div().size(5).rounded_full().flex_none().bg(requests.some((request) => provider(request) === name && request.live) ? t.working : t.done)
-            .when(active.some((request) => provider(request) === name), dot => dot.loop("opacity", { from: 0.45, to: 1, period: 1600 })))
-          .child(text(requests.find((request) => provider(request) === name && request.providerName)?.providerName || name, t.foreground, 10).truncate())))
+        .children(sourceNames.map((name, i) => {
+          const request = requests.find((item) => sourceKey(item) === name);
+          const label = current(request) && focusedAgent?.title ? focusedAgent.title : request.session ? `会话 ${request.session.slice(-6)}` : "会话未知";
+          const isCurrent = active.some((item) => sourceKey(item) === name && current(item));
+          return h_flex().absolute().left(14).top(nodeY(sourceNames, i) - nodeHeight / 2).w(82).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(isCurrent ? t.accent : t.border).bg(t.surface).tooltip(label)
+            .child(icon(request.agent || "Agent")).child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(label));
+        }))
+        .children(providerNames.map((name, i) => {
+          const request = requests.find((item) => provider(item) === name);
+          const title = request.providerName || name;
+          const models = [...new Set(active.filter((item) => current(item) && provider(item) === name).map(actualModel))];
+          const label = models.length ? `${title} · ${models.join("、")}` : title;
+          return h_flex().absolute().right(14).top(nodeY(providerNames, i) - nodeHeight / 2).w(82).h(nodeHeight).px(5).gap(3).items_center().rounded(5).border(1).border_color(t.border).bg(t.surface).tooltip(label)
+            .child(icon(name)).child(v_flex().flex_1().min_w(0).gap(1)
+              .child(h_flex().gap(3).items_center().child(div().size(5).rounded_full().flex_none().bg(active.some((item) => provider(item) === name) ? t.working : t.done))
+                .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(title)))
+              .when(models.length > 0, row => row.child(div().min_w(0).truncate().text_size(8).text_color(t.dim).child(models.join("、")))));
+        }))
         .child(div().absolute().left(middle - 15).top((stageHeight - hubHeight) / 2).w(30).h(hubHeight).rounded_full().border(1).border_color(t.border).bg(t.surface).flex().items_center().justify_center()
           .child(svg("mods/magpie-live/magpie.svg").size(17).text_color(t.muted)));
       const activeRows = active.map((request, i) => {
