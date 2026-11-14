@@ -62,7 +62,6 @@ export default class MagpieLive extends View {
     if (!Array.isArray(this.pinnedSections)) this.pinnedSections = [];
     try { this.hiddenProviders = JSON.parse(localStorage.getItem("magpie-live.hidden-providers") || "[]"); } catch { this.hiddenProviders = []; }
     if (!Array.isArray(this.hiddenProviders)) this.hiddenProviders = [];
-    this.editOverview = false;
     this.base = BASE;
     this.usage = null;
     this.quotas = null;
@@ -500,35 +499,25 @@ export default class MagpieLive extends View {
       });
       const sections = [
         { id: "graph", name: "路由图", view: () => div().flex().justify_center().child(graph) },
-        { id: "quotas", name: "来源额度", view: () => v_flex().gap(6)
-          .child(h_flex().justify_between().items_center().child(text("来源额度", t.foreground, 12).font_semibold())
-            .child(div().id("quota-manage").cursor_pointer().px(5).py(3).text_size(10).text_color(t.accent).on_click((_e, next) => { this.editQuotas = !this.editQuotas; next.notify(); }).child(this.editQuotas ? "完成" : "隐藏 / 显示")))
-          .child(div().id("provider-quota-list").w_full().child(this.providerQuotas(t))) },
-        { id: "usage", name: "用量概览", view: () => v_flex().gap(6).child(heading("用量概览", PERIODS.find(([id]) => id === this.period)?.[1] || "本期")).child(this.usageOverview(t)) },
-        { id: "decisions", name: "实时路由决策", view: () => v_flex().gap(6).child(heading("实时路由决策", `${active.length} 个处理中`)).children(activeRows).when(!activeRows.length, body => body.child(text("当前没有进行中的请求", t.dim, 10))) },
-        { id: "session", name: "当前会话", view: () => v_flex().gap(6).child(heading(currentSession ? "当前会话" : "最近会话", PERIODS.find(([id]) => id === this.period)?.[1] || "本期"))
-          .child(v_flex().gap(4).p(8).rounded(6).bg(t.raised).child(text(sessionId ? `${session?.agent || focusedType || "Agent"} · ${sessionId.slice(-8)}` : "尚无会话", t.foreground, 10)).child(text(sessionMetrics, t.muted, 10))) },
-        { id: "requests", name: "最近请求", view: () => v_flex().gap(6).child(h_flex().justify_between().items_center().py(5).border_b(1).border_color(t.border)
-          .child(text(`请求 · 最近 ${requests.length} 条`, t.dim, 10)).child(div().id("route-mask").text_size(10).text_color(t.muted).cursor_pointer()
-            .on_click((_e, next) => { this.maskAccounts = !this.maskAccounts; localStorage.setItem("magpie-live.mask", String(this.maskAccounts)); next.notify(); }).child(this.maskAccounts ? "账号已隐藏" : "隐藏账号")))
-          .children(rows).when(!requests.length, body => body.child(text("等待请求", t.dim, 11))) },
+        { id: "quotas", name: "来源额度", extra: () => div().id("quota-manage").cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.editQuotas = !this.editQuotas; next.notify(); }).child(this.editQuotas ? "完成" : "隐藏 / 显示"),
+          view: () => div().id("provider-quota-list").w_full().child(this.providerQuotas(t)) },
+        { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageOverview(t) },
+        { id: "decisions", name: "实时路由决策", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(6).children(activeRows).when(!activeRows.length, body => body.child(text("当前没有进行中的请求", t.dim, 10))) },
+        { id: "session", name: currentSession ? "当前会话" : "最近会话", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10),
+          view: () => v_flex().gap(4).p(8).rounded(6).bg(t.raised).child(text(sessionId ? `${session?.agent || focusedType || "Agent"} · ${sessionId.slice(-8)}` : "尚无会话", t.foreground, 10)).child(text(sessionMetrics, t.muted, 10)) },
+        { id: "requests", name: `最近请求 · ${requests.length}`, extra: () => div().id("route-mask").text_size(10).text_color(t.muted).cursor_pointer()
+          .on_click((_e, next) => { this.maskAccounts = !this.maskAccounts; localStorage.setItem("magpie-live.mask", String(this.maskAccounts)); next.notify(); }).child(this.maskAccounts ? "账号已隐藏" : "隐藏账号"),
+          view: () => v_flex().gap(6).children(rows).when(!requests.length, body => body.child(text("等待请求", t.dim, 11))) },
       ];
       const ids = sections.map((section) => section.id);
       const order = [...new Set(this.overviewOrder.filter((id) => ids.includes(id))), ...ids.filter((id) => !this.overviewOrder.includes(id))];
-      const layoutEditor = v_flex().gap(4).children(order.map((id, i) => {
-        const section = sections.find((item) => item.id === id);
-        const hidden = this.hiddenSections.includes(id);
-        const move = (direction, next) => { const updated = [...order]; [updated[i], updated[i + direction]] = [updated[i + direction], updated[i]]; this.overviewOrder = updated; localStorage.setItem("magpie-live.overview-order", JSON.stringify(updated)); next.notify(); };
-        return h_flex().items_center().gap(8).p(6).rounded(5).bg(t.raised)
-          .child(div().flex_1().text_size(10).text_color(t.foreground).child(section.name))
-          .when(i > 0, row => row.child(div().id(`overview-up-${id}`).cursor_pointer().text_color(t.muted).on_click((_e, next) => move(-1, next)).child("↑")))
-          .when(i < order.length - 1, row => row.child(div().id(`overview-down-${id}`).cursor_pointer().text_color(t.muted).on_click((_e, next) => move(1, next)).child("↓")))
-          .child(div().id(`overview-visibility-${id}`).cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.hiddenSections = hidden ? this.hiddenSections.filter((item) => item !== id) : [...this.hiddenSections, id]; localStorage.setItem("magpie-live.hidden-sections", JSON.stringify(this.hiddenSections)); next.notify(); }).child(hidden ? "显示" : "隐藏"));
-      }));
       const sectionView = (id) => {
+        const section = sections.find((item) => item.id === id);
         const fixed = this.pinnedSections.includes(id);
         return v_flex().id(`overview-section-${id}`).relative().p(8).rounded(8).border(1).border_color(t.border).bg(t.surface)
+          .when(this.draggingSection, card => card.cursor_grabbing())
           .hover(style => style.border_color(t.muted))
+          .on_hover((hovered, next) => { const current = hovered ? id : this.hoveredSection === id ? null : this.hoveredSection; if (current !== this.hoveredSection) { this.hoveredSection = current; next.notify(); } })
           .when(this.draggingSection && this.pressedSection === id, card => card.opacity(0.5))
           .when(this.draggingSection && this.overSection === id && this.pressedSection !== id, card => card.child(div().absolute().left(4).right(4).when(this.dropSectionAfter, line => line.bottom(0)).when(!this.dropSectionAfter, line => line.top(0)).h(2).bg(t.accent)))
           .on_mouse_move((event, next) => {
@@ -552,15 +541,23 @@ export default class MagpieLive extends View {
             }
             next.notify();
           })
-          .child(h_flex().justify_between().items_center()
-            .child(div().id(`overview-drag-${id}`).size(18).flex().items_center().justify_center().cursor_grab().text_color(t.dim).tooltip("拖动排序").role("button").accessibility_label(`拖动${sections.find((item) => item.id === id).name}排序`)
+          .child(h_flex().items_center().gap(4).pb(4)
+            .child(div().id(`overview-drag-${id}`).size(18).flex_none().flex().items_center().justify_center().cursor_grab().text_color(t.dim).tooltip("拖动排序").role("button").accessibility_label(`拖动${section.name}排序`)
+              .when(this.draggingSection && this.pressedSection === id, handle => handle.cursor_grabbing())
               .on_mouse_down("left", (event, next) => { next.stop_propagation(); this.pressedSection = id; this.sectionPressPosition = event.position; this.overSection = null; this.draggingSection = false; })
               .on_click((_event, next) => next.stop_propagation()).child("⋮⋮"))
-            .child(div().id(`overview-pin-${id}`).size(18).flex().items_center().justify_center().rounded(4).cursor_pointer().text_color(fixed ? t.accent : t.dim).hover(style => style.bg(t.hover).text_color(t.foreground)).tooltip(fixed ? "取消固定" : "固定到顶部")
-              .on_mouse_down("left", (_event, next) => next.stop_propagation())
-              .on_click((_event, next) => { next.stop_propagation(); this.pinnedSections = fixed ? this.pinnedSections.filter((item) => item !== id) : [...this.pinnedSections, id]; localStorage.setItem("magpie-live.pinned-sections", JSON.stringify(this.pinnedSections)); next.notify(); })
-              .child(svg("mods/workspace-chrome-personal/pin.svg").size(12))))
-          .child(sections.find((item) => item.id === id).view());
+            .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.foreground).font_semibold().child(section.name))
+            .when(Boolean(section.extra), row => row.child(section.extra()))
+            .child(h_flex().gap(2).items_center()
+              .when(this.hoveredSection === id, row => row.child(div().id(`overview-hide-${id}`).size(18).flex().items_center().justify_center().rounded(4).cursor_pointer().text_color(t.dim).hover(style => style.bg(t.hover).text_color(t.foreground)).tooltip("隐藏区块")
+                .on_mouse_down("left", (_event, next) => next.stop_propagation())
+                .on_click((_event, next) => { next.stop_propagation(); this.hiddenSections = [...this.hiddenSections, id]; localStorage.setItem("magpie-live.hidden-sections", JSON.stringify(this.hiddenSections)); next.notify(); })
+                .child(svg("mods/workspace-chrome-personal/x.svg").size(12))))
+              .when(this.hoveredSection === id || fixed, row => row.child(div().id(`overview-pin-${id}`).size(18).flex().items_center().justify_center().rounded(4).cursor_pointer().text_color(fixed ? t.accent : t.dim).hover(style => style.bg(t.hover).text_color(t.foreground)).tooltip(fixed ? "取消固定" : "固定到顶部")
+                .on_mouse_down("left", (_event, next) => next.stop_propagation())
+                .on_click((_event, next) => { next.stop_propagation(); this.pinnedSections = fixed ? this.pinnedSections.filter((item) => item !== id) : [...this.pinnedSections, id]; localStorage.setItem("magpie-live.pinned-sections", JSON.stringify(this.pinnedSections)); next.notify(); })
+                .child(svg("mods/workspace-chrome-personal/pin.svg").size(12))))))
+          .child(section.view());
       };
       const visible = order.filter((id) => !this.hiddenSections.includes(id));
       const pinned = visible.filter((id) => this.pinnedSections.includes(id));
@@ -574,11 +571,13 @@ export default class MagpieLive extends View {
           .child(text(`${this.active.length} 个处理中`, this.active.length ? t.working : t.dim, 10)))
         .when(Boolean(this.error), body => body.child(card(t).child(text(`连接异常 · ${this.error}`, t.blocked))))
         .when(Boolean(this.recentError), body => body.child(text(`请求记录暂不可用 · ${this.recentError}`, t.blocked, 10)))
-        .child(h_flex().justify_end().px(10).child(div().id("overview-manage").cursor_pointer().px(5).py(3).text_size(10).text_color(t.accent).on_click((_e, next) => { this.editOverview = !this.editOverview; next.notify(); }).child(this.editOverview ? "完成布局" : "管理总览")))
+        .when(this.hiddenSections.some((id) => ids.includes(id)), body => body.child(h_flex().px(10).pb(4).gap(5).items_center().flex_wrap()
+          .child(text("已隐藏：", t.dim, 10))
+          .children(order.filter((id) => this.hiddenSections.includes(id)).map((id) => div().id(`overview-restore-${id}`).cursor_pointer().text_size(10).text_color(t.accent).tooltip("恢复区块")
+            .on_click((_e, next) => { this.hiddenSections = this.hiddenSections.filter((item) => item !== id); localStorage.setItem("magpie-live.hidden-sections", JSON.stringify(this.hiddenSections)); next.notify(); }).child(`+ ${sections.find((item) => item.id === id).name}`)))))
         .when(pinned.length > 0, body => body.child(div().id("overview-pinned").flex_none().h(Math.min(this.pinnedHeight || Math.max(80, this.height * 0.4), Math.max(80, this.height * 0.4))).overflow_y_scrollbar().px(8)
           .child(v_flex().id("overview-pinned-content").flex_none().gap(8).on_size_change((size, next) => { if (this.pinnedHeight !== size.height) { this.pinnedHeight = size.height; next.notify(); } }).children(pinned.map(sectionView)))))
         .child(div().flex_1().min_h(0).overflow_y_scrollbar().child(v_flex().gap(8).p(8)
-          .when(this.editOverview, body => body.child(layoutEditor))
           .children(visible.filter((id) => !this.pinnedSections.includes(id)).map(sectionView))))
         .child(h_flex().justify_between().px(10).py(7).border_t(1).border_color(t.border)
           .child(text("数据只读 · 每 5 秒刷新", t.dim, 9))
