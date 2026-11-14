@@ -457,6 +457,16 @@ export default class MagpieLive extends View {
         .when(!active.length, view => view.child(div().absolute().left(0).right(0).top(12).flex().justify_center().child(text("当前没有活动路由", t.dim, 10))))
         .child(div().absolute().left(middle - hubHeight / 2).top(hubY - hubHeight / 2).w(hubHeight).h(hubHeight).rounded_full().bg(t.surface).flex().items_center().justify_center()
           .child(svg("mods/magpie-live/magpie.svg").size(17).text_color(t.muted)));
+      const sessionId = currentSession || active[0]?.session || requests[0]?.session;
+      const session = (usage?.sessions ?? []).find((item) => item.id === sessionId);
+      const promptTokens = session ? (session.input || 0) + (session.cache_read || 0) + (session.cache_write || 0) : 0;
+      const sessionMetrics = session ? [
+        `${session.calls} 次请求`,
+        `${countTokens(promptTokens + (session.output || 0))} token`,
+        promptTokens ? `缓存 ${Math.round((session.cache_read || 0) * 100 / promptTokens)}%` : null,
+        session.decode_ms > 0 ? `${Math.round((session.decode_out || 0) * 1000 / session.decode_ms)} token/秒` : null,
+        session.unpriced ? `已计价 ≈$${Number(session.cost || 0).toFixed(3)} · 部分未计价` : session.cost != null ? `≈$${Number(session.cost).toFixed(3)}` : null,
+      ].filter(Boolean).join(" · ") : "该时间段暂无统计";
       const currentRoutes = active.filter(current);
       const activeRows = [...currentRoutes, ...active.filter((request) => !current(request))].map((request, i) => {
         const latest = this.routes[request.session];
@@ -472,18 +482,10 @@ export default class MagpieLive extends View {
             .child(div().min_w(0).truncate().text_size(11).text_color(t.accent).font_semibold().tooltip(actualModel(request)).child(actualModel(request)))
             .when(Boolean(route?.group), row => row.child(text(`（${this.groupNames[route.group] || route.group}）`, t.muted, 10))))
           .child(text(`原因 · ${reason}`, t.muted, 10))
-          .child(text(`回答中 · ${((request.ms || 0) / 1000).toFixed(1)} 秒`, t.working, 9));
+          .child(text(`回答中 · ${((request.ms || 0) / 1000).toFixed(1)} 秒`, t.working, 9))
+          .when(current(request) && i === 0, row => row.child(div().pt(4).border_t(1).border_color(t.border)
+            .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} · ${sessionId.slice(-8)} · ${sessionMetrics}`, t.muted, 10))));
       });
-      const sessionId = currentSession || active[0]?.session || requests[0]?.session;
-      const session = (usage?.sessions ?? []).find((item) => item.id === sessionId);
-      const promptTokens = session ? (session.input || 0) + (session.cache_read || 0) + (session.cache_write || 0) : 0;
-      const sessionMetrics = session ? [
-        `${session.calls} 次请求`,
-        `${countTokens(promptTokens + (session.output || 0))} token`,
-        promptTokens ? `缓存 ${Math.round((session.cache_read || 0) * 100 / promptTokens)}%` : null,
-        session.decode_ms > 0 ? `${Math.round((session.decode_out || 0) * 1000 / session.decode_ms)} token/秒` : null,
-        session.unpriced ? `已计价 ≈$${Number(session.cost || 0).toFixed(3)} · 部分未计价` : session.cost != null ? `≈$${Number(session.cost).toFixed(3)}` : null,
-      ].filter(Boolean).join(" · ") : "该时间段暂无统计";
       const rows = requests.map((request, i) => {
         const expanded = this.selectedRoute != null && String(this.selectedRoute) === String(request.route_id);
         const latest = this.routes[request.session];
@@ -515,11 +517,12 @@ export default class MagpieLive extends View {
           view: () => div().id("provider-quota-list").w_full().child(this.providerQuotas(t)) },
         { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageOverview(t) },
         { id: "decisions", name: "实时路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(6)
-          .when(!currentSession, body => body.child(text("无法识别当前会话", t.dim, 10)))
-          .when(Boolean(currentSession) && !currentRoutes.length, body => body.child(text("当前会话暂无进行中的请求", t.dim, 10)))
+          .when(!currentRoutes.length, body => body.child(v_flex().gap(4).p(6).rounded(5).bg(currentSession ? t.selected : t.raised)
+            .when(Boolean(currentSession), card => card.border(1).border_color(t.border))
+            .child(text(currentSession ? "当前会话暂无进行中的请求" : "无法识别当前会话", t.dim, 10))
+            .child(text(sessionId ? `${currentSession ? "当前会话" : "最近会话"} · ${session?.agent || focusedType || "Agent"} · ${sessionId.slice(-8)}` : "尚无会话", t.foreground, 10))
+            .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} · ${sessionMetrics}`, t.muted, 10))))
           .children(activeRows) },
-        { id: "session", name: currentSession ? "当前会话" : "最近会话", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10),
-          view: () => v_flex().gap(4).p(8).rounded(6).bg(t.raised).child(text(sessionId ? `${session?.agent || focusedType || "Agent"} · ${sessionId.slice(-8)}` : "尚无会话", t.foreground, 10)).child(text(sessionMetrics, t.muted, 10)) },
         { id: "requests", name: `最近请求 · ${requests.length}`, extra: () => div().id("route-mask").text_size(10).text_color(t.muted).cursor_pointer()
           .on_click((_e, next) => { this.maskAccounts = !this.maskAccounts; localStorage.setItem("magpie-live.mask", String(this.maskAccounts)); next.notify(); }).child(this.maskAccounts ? "账号已隐藏" : "隐藏账号"),
           view: () => v_flex().gap(6).children(rows).when(!requests.length, body => body.child(text("等待请求", t.dim, 11))) },
