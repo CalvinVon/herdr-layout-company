@@ -1,6 +1,7 @@
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { home, readTextFile, theme, nextCommand, exec, focused, terminals, agents, layout } from "herdr";
+import { comparisonRange, usageComparison } from "./usage-comparison.js";
 
 const BASE = "http://127.0.0.1:3425";
 const PERIODS = [["today", "今天"], ["7d", "7天"], ["30d", "30天"], ["all", "全部"]];
@@ -64,6 +65,8 @@ export default class MagpieLive extends View {
     if (!Array.isArray(this.hiddenProviders)) this.hiddenProviders = [];
     this.base = BASE;
     this.usage = null;
+    this.comparison = null;
+    this.comparisonCache = null;
     this.quotas = null;
     this.history = [];
     this.historyAt = 0;
@@ -194,6 +197,18 @@ export default class MagpieLive extends View {
         const [usage, quota, active] = await Promise.all([
           usageRes.json(), quotaRes.json(), activeRes.json(),
         ]);
+        const range = comparisonRange(usage);
+        if (range && period === this.period) {
+          const key = `${this.base}|${range}`;
+          if (!this.comparisonCache || this.comparisonCache.key !== key || Date.now() - this.comparisonCache.at >= 60000) {
+            try {
+              const [previous, coverage] = await Promise.all([fetch(periodPath(this.base, range)), fetch(periodPath(this.base, "all"))]);
+              if (!previous.ok || !coverage.ok) throw new Error("用量对比数据不可用");
+              const [baseline, all] = await Promise.all([previous.json(), coverage.json()]);
+              this.comparisonCache = { key, at: Date.now(), baseline, since: all.since };
+            } catch { this.comparisonCache = null; }
+          }
+        }
         const sessions = [...new Set((active.active ?? []).map((request) => request.session).filter(Boolean))];
         const routeEntries = await Promise.all(sessions.map(async (session) => {
           try {
@@ -203,7 +218,11 @@ export default class MagpieLive extends View {
           } catch { return [session, null]; }
         }));
         this.routes = Object.fromEntries(routeEntries.filter(([, route]) => route));
-        if (period === this.period) this.usage = usage;
+        if (period === this.period) {
+          this.usage = usage;
+          this.comparison = range && this.comparisonCache?.key === `${this.base}|${range}`
+            ? usageComparison(usage, this.comparisonCache.baseline, this.comparisonCache.since) : null;
+        }
         this.quotas = quota.data ?? [];
         this.active = active.active ?? [];
         if (!this.active.length) this.motionView.set_props({ paths: [], start: this.motionStart });
@@ -231,6 +250,7 @@ export default class MagpieLive extends View {
     this.period = period;
     localStorage.setItem("magpie-live.period", period);
     this.usage = null;
+    this.comparison = null;
     this.refresh(cx);
     cx.notify();
   }
@@ -332,11 +352,12 @@ export default class MagpieLive extends View {
     return groups.length ? h_flex().w_full().gap(6).items_start().children([0, 1].map((column) => v_flex().flex_1().min_w(0).gap(6).children(groups.filter((_group, index) => index % 2 === column)))) : text("额度已全部隐藏，点击管理恢复", t.dim, 10);
   }
 
-  metric(t, label, value, detail) {
+  metric(t, label, value, detail, comparison) {
     return v_flex().flex_1().min_w(0).gap(4).p(8)
       .child(text(label, t.muted, 10))
       .child(text(value, t.foreground, 16).font_semibold())
-      .child(text(detail, t.dim, 9));
+      .child(text(detail, t.dim, 9))
+      .when(Boolean(comparison), row => row.child(text(comparison, t.accent, 9)));
   }
 
   usageOverview(t) {
@@ -344,16 +365,18 @@ export default class MagpieLive extends View {
     const input = usage?.input ?? 0, output = usage?.output ?? 0;
     const cacheRead = usage?.cache_read ?? 0, cacheWrite = usage?.cache_write ?? 0;
     const prompt = input + cacheRead + cacheWrite;
+    const comparison = this.comparison;
+    const unavailable = usage && usage.period !== "all" && !comparison ? "暂无可比较数据" : null;
     return v_flex().gap(6).children([
       h_flex().gap(6).children([
-        this.metric(t, "Token", usage ? countTokens(prompt + output) : "—", usage ? `输入 ${countTokens(input)} · 输出 ${countTokens(output)} · 缓存 ${countTokens(cacheRead + cacheWrite)}` : "等待数据"),
-        this.metric(t, "请求", usage?.calls?.toLocaleString() ?? "—", usage ? `${usage.errors ?? 0} 次失败 · ${usage.retried ?? 0} 次改道` : "等待数据"),
+        this.metric(t, "Token", usage ? countTokens(prompt + output) : "—", usage ? `输入 ${countTokens(input)} · 输出 ${countTokens(output)} · 缓存 ${countTokens(cacheRead + cacheWrite)}` : "等待数据", comparison?.tokens || unavailable),
+        this.metric(t, "请求", usage?.calls?.toLocaleString() ?? "—", usage ? `${usage.errors ?? 0} 次失败 · ${usage.retried ?? 0} 次改道` : "等待数据", comparison?.calls || unavailable),
       ]),
       h_flex().gap(6).children([
-        this.metric(t, "费用", usage?.cost == null ? "—" : `≈$${Number(usage.cost).toFixed(2)}`, usage?.unpriced ? "部分未计价" : "生效价格"),
-        this.metric(t, "缓存命中率", usage && prompt ? `${Math.round(cacheRead * 100 / prompt)}%` : "—", "占提示词"),
+        this.metric(t, "费用", usage?.cost == null ? "—" : `≈$${Number(usage.cost).toFixed(2)}`, usage?.unpriced ? "部分未计价" : "生效价格", comparison?.cost || unavailable),
+        this.metric(t, "缓存命中率", usage && prompt ? `${Math.round(cacheRead * 100 / prompt)}%` : "—", "占提示词", comparison?.cache || unavailable),
       ]),
-    ]);
+    ]).when(Boolean(comparison), view => view.child(text(comparison.note, t.dim, 9)));
   }
 
   render(cx) {

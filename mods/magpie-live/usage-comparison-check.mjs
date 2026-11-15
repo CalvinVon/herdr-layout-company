@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+const source = await readFile(new URL('./usage-comparison.js', import.meta.url));
+const { usageComparison, comparisonRange } = await import(`data:text/javascript;base64,${source.toString('base64')}`);
+
+const hour = (calls, i) => ({ time: `2026-11-15T${String(i).padStart(2, '0')}:00:00+08:00`, calls, input: calls, output: calls * 0.2, cache_read: calls * 0.8, cache_write: 0, cost: calls * 0.1, unpriced: 0 });
+const baseline = { period: '2026-11-14..2026-11-14', since: '2026-11-14T00:00:00+08:00', bucket: 'hour', series: Array.from({ length: 24 }, (_, i) => hour(10, i)) };
+const today = { period: 'today', since: '2026-11-15T00:00:00+08:00', bucket: 'hour', series: Array.from({ length: 24 }, (_, i) => hour(15, i)) };
+const now = new Date('2026-11-15T12:30:00+08:00');
+const pace = usageComparison(today, baseline, '2026-11-01T00:00:00+08:00', now);
+assert.notEqual(pace, null, 'completed hours are comparable');
+assert.equal(pace.calls, '较昨日同小时 +50%');
+assert.equal(pace.tokens, '较昨日同小时 +50%');
+assert.equal(pace.cost, '较昨日同小时 +50%');
+assert.equal(pace.cache, '较昨日 +0 个百分点');
+assert.equal(pace.note, '截至 12:00，不含当前小时');
+assert.equal(comparisonRange(today), '2026-11-14..2026-11-14');
+const week = { period: '7d', since: '2026-11-09T00:00:00+08:00', calls: 770, input: 770, output: 154, cache_read: 616, cache_write: 0, cost: 77, unpriced: 0 };
+const previousWeek = { period: '2026-11-02..2026-11-08', since: '2026-11-02T00:00:00+08:00', calls: 700, input: 700, output: 140, cache_read: 560, cache_write: 0, cost: 70, unpriced: 0 };
+assert.equal(comparisonRange(week), '2026-11-02..2026-11-08');
+assert.equal(usageComparison(week, previousWeek, '2026-11-01T00:00:00+08:00', now).calls, '较前7天 +10%');
+assert.equal(usageComparison(week, previousWeek, '2026-11-03T00:00:00+08:00', now), null);
+assert.equal(usageComparison({ ...week, period: 'all' }, previousWeek, '2026-11-01T00:00:00+08:00', now), null);
+assert.equal(usageComparison({ ...week, unpriced: 1 }, previousWeek, '2026-11-01T00:00:00+08:00', now).cost, '费用部分未计价');
+assert.equal(usageComparison(week, { ...previousWeek, calls: 0 }, '2026-11-01T00:00:00+08:00', now).calls, '前7天基准为0');
+assert.equal(usageComparison(today, baseline, '2026-11-01T00:00:00+08:00', new Date('2026-11-15T00:30:00+08:00')), null);
+console.log('usage comparison checks passed');
