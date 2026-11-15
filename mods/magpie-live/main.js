@@ -368,7 +368,7 @@ export default class MagpieLive extends View {
     const cacheRead = usage?.cache_read ?? 0, cacheWrite = usage?.cache_write ?? 0;
     const prompt = input + cacheRead + cacheWrite;
     const comparison = this.comparison;
-    const unavailable = usage && usage.period !== "all" && !comparison ? "暂无可比较数据" : null;
+    const unavailable = usage && ["7d", "30d"].includes(usage.period) && !comparison ? "暂无可比较数据" : null;
     return v_flex().gap(6).children([
       h_flex().gap(6).children([
         this.metric(t, "Token", usage ? countTokens(prompt + output) : "—", usage ? `输入 ${countTokens(input)} · 输出 ${countTokens(output)} · 缓存 ${countTokens(cacheRead + cacheWrite)}` : "等待数据", comparison?.tokens || unavailable),
@@ -390,8 +390,7 @@ export default class MagpieLive extends View {
     const partialCost = metric === "cost" && points.some((point) => point.unpriced);
     const label = CHART_METRICS.find(([id]) => id === metric)?.[1] || "请求";
     return v_flex().id("usage-chart").gap(6).p(8).rounded(8).bg(t.raised)
-      .child(h_flex().items_center().justify_between().gap(4)
-        .child(text("用量走势", t.foreground, 10).font_semibold())
+      .child(h_flex().items_center().justify_end().gap(4)
         .child(h_flex().gap(2).children(CHART_METRICS.map(([id, title]) => div().id(`usage-chart-${id}`).px(6).py(4).rounded(5).cursor_pointer().role("button").accessibility_label(`切换${title}走势`)
           .bg(metric === id ? t.selected : t.raised).text_color(metric === id ? t.foreground : t.muted).text_size(9)
           .on_click((_e, next) => { this.chartMetric = id; localStorage.setItem("magpie-live.chart-metric", id); next.notify(); }).child(title)))))
@@ -399,7 +398,7 @@ export default class MagpieLive extends View {
       .when(Boolean(usage) && !points.length, view => view.child(text("当前周期暂无走势数据", t.dim, 10)))
       .when(points.length > 0, view => view
         .child(h_flex().items_center().gap(5).child(div().size(5).rounded(1).bg(t.accent)).child(text("本期", t.muted, 9))
-          .when(hasPrevious, row => row.child(div().size(5).rounded(1).bg(t.muted).opacity(0.45)).child(text(usage.period === "today" ? "昨日" : "前周期", t.muted, 9)))
+          .when(hasPrevious, row => row.child(div().size(5).rounded(1).bg(t.muted).opacity(0.45)).child(text("前周期", t.muted, 9)))
           .child(div().flex_1()).child(text(`最高 ${format(max)}`, t.dim, 9)))
         .child(h_flex().id("usage-chart-bars").w_full().h(56).gap(1).items_end().border_b(1).border_color(t.border)
           .role("image").accessibility_label(`${label}走势，${points.length}个时段，最高${format(max)}${hasPrevious ? "，包含前周期对照" : ""}`)
@@ -411,7 +410,6 @@ export default class MagpieLive extends View {
               .child(div().flex_1().min_w(0).h(height(point.current)).rounded(1).bg(t.accent));
           })))
         .child(h_flex().justify_between().child(text(points[0].label || "开始", t.dim, 9)).child(text(points[points.length - 1].label || "当前", t.dim, 9)))
-        .when(usage.period === "today" && hasPrevious, body => body.child(text("昨日仅显示已结束小时；本期含当前小时", t.dim, 9)))
         .when(Boolean(usage.series?.length > 30), body => body.child(text("展示最近 30 个时段", t.dim, 9)))
         .when(partialCost, body => body.child(text("部分费用未计价，图中仅含已计价金额", t.dim, 9))));
   }
@@ -580,7 +578,8 @@ export default class MagpieLive extends View {
         { id: "graph", name: "全部活动路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => div().flex().justify_center().child(graph) },
         { id: "quotas", name: "来源额度", extra: () => div().id("quota-manage").cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.editQuotas = !this.editQuotas; next.notify(); }).child(this.editQuotas ? "完成" : "隐藏 / 显示"),
           view: () => div().id("provider-quota-list").w_full().child(this.providerQuotas(t)) },
-        { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => v_flex().gap(8).child(this.usageOverview(t)).child(this.usageChart(t)) },
+        { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageOverview(t) },
+        { id: "usage-trend", name: "用量走势", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageChart(t) },
         { id: "decisions", name: "实时路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(6)
           .when(!currentRoutes.length, body => body.child(v_flex().gap(5).p(10).rounded(8).bg(currentSession ? t.selected : light ? t.raised : t.surface)
             .when(Boolean(currentSession), card => card.border(1).border_color(t.border))
@@ -596,6 +595,10 @@ export default class MagpieLive extends View {
       ];
       const ids = sections.map((section) => section.id);
       const order = [...new Set(this.overviewOrder.filter((id) => ids.includes(id))), ...ids.filter((id) => !this.overviewOrder.includes(id))];
+      if (!this.overviewOrder.includes("usage-trend")) {
+        order.splice(order.indexOf("usage-trend"), 1);
+        order.splice(order.indexOf("usage") + 1, 0, "usage-trend");
+      }
       const sectionView = (id) => {
         const section = sections.find((item) => item.id === id);
         const fixed = this.pinnedSections.includes(id);
@@ -687,6 +690,7 @@ export default class MagpieLive extends View {
         .when(Boolean(this.error), body => body.child(card(t).child(text(`数据暂不可用 · 保留上次成功数据。${this.error}`, t.blocked, 10))))
         .child(heading("用量概览", `${usage?.since ? new Date(usage.since).toLocaleDateString() : ""}`))
         .child(this.usageOverview(t))
+        .child(heading("用量走势", PERIODS.find(([id]) => id === this.period)?.[1] || "本期"))
         .child(this.usageChart(t))
         .child(heading("额度", `${this.quotas?.length ?? 0} 个来源`))
         .children(this.quotaCards(t))))

@@ -7,14 +7,8 @@ const hour = (calls, i) => ({ time: `2026-11-15T${String(i).padStart(2, '0')}:00
 const baseline = { period: '2026-11-14..2026-11-14', since: '2026-11-14T00:00:00+08:00', bucket: 'hour', series: Array.from({ length: 24 }, (_, i) => hour(10, i)) };
 const today = { period: 'today', since: '2026-11-15T00:00:00+08:00', bucket: 'hour', series: Array.from({ length: 24 }, (_, i) => hour(15, i)) };
 const now = new Date('2026-11-15T12:30:00+08:00');
-const pace = usageComparison(today, baseline, '2026-11-01T00:00:00+08:00', now);
-assert.notEqual(pace, null, 'completed hours are comparable');
-assert.equal(pace.calls, '较昨日同小时 +50%');
-assert.equal(pace.tokens, '较昨日同小时 +50%');
-assert.equal(pace.cost, '较昨日同小时 +50%');
-assert.equal(pace.cache, '较昨日 +0 个百分点');
-assert.equal(pace.note, '截至 12:00，不含当前小时');
-assert.equal(comparisonRange(today), '2026-11-14..2026-11-14');
+assert.equal(usageComparison(today, baseline, '2026-11-01T00:00:00+08:00', now), null);
+assert.equal(comparisonRange(today), null);
 const week = { period: '7d', since: '2026-11-09T00:00:00+08:00', calls: 770, input: 770, output: 154, cache_read: 616, cache_write: 0, cost: 77, unpriced: 0 };
 const previousWeek = { period: '2026-11-02..2026-11-08', since: '2026-11-02T00:00:00+08:00', calls: 700, input: 700, output: 140, cache_read: 560, cache_write: 0, cost: 70, unpriced: 0 };
 assert.equal(comparisonRange(week), '2026-11-02..2026-11-08');
@@ -27,8 +21,8 @@ assert.equal(usageComparison(today, baseline, '2026-11-01T00:00:00+08:00', new D
 assert.equal(typeof usageChartData, 'function', 'usage trend data is available');
 const chart = usageChartData(today, baseline, true, 'calls', now);
 assert.equal(chart.length, 13, 'today includes the current hour but not future hours');
-assert.equal(chart[11].previous, 10);
-assert.equal(chart[12].previous, null, 'previous current hour is excluded');
+assert.equal(chart[11].previous, null, 'today has no yesterday comparison');
+assert.equal(chart[12].previous, null, 'current hour has no comparison');
 assert.equal(usageChartData(today, baseline, true, 'tokens', now)[0].current, 30);
 assert.equal(usageChartData(today, baseline, false, 'cost', now)[0].previous, null);
 assert.equal(usageChartData({ period: 'all', series: Array.from({length: 40}, (_, i) => ({calls: i})) }, null, false, 'calls', now).length, 30);
