@@ -318,12 +318,15 @@ export default class MagpieLive extends View {
           const account = quota.user ? (this.maskAccounts ? shortAccount(quota.user) : quota.user) : "";
           const label = [account, window?.name || (quota.balance != null ? "余额" : "额度")].filter(Boolean).join(" · ");
           const value = window ? (remaining === null ? "—" : `${remaining.toFixed(0)}%`) : quota.balance != null ? String(quota.balance) : "—";
-          return h_flex().items_center().gap(3)
-            .child(div().flex_1().min_w(0).truncate().tooltip(label).text_size(9).text_color(t.dim).opacity(hidden ? 0.5 : 1).child(label))
-            .when(!this.editQuotas, row => row.child(text(value, t.foreground, 11).font_semibold())
-              .when(Boolean(window), detail => detail.child(text(pace === null ? "—" : `${pace > 0 ? "+" : ""}${pace}%`, pace !== null && pace < 0 ? t.blocked : t.muted, 9).tooltip("配速"))))
-            .when(this.editQuotas, row => row.child(div().id(`quota-visibility-${i}-${index}`).flex_none().cursor_pointer().px(4).py(2).rounded(4).bg(t.surface).text_size(10).text_color(t.accent).tooltip(hidden ? "显示此额度" : "隐藏此额度")
-              .on_click((_e, cx) => { this.hiddenQuotas = hidden ? this.hiddenQuotas.filter((item) => item !== key) : [...this.hiddenQuotas, key]; localStorage.setItem("magpie-live.hidden-quotas", JSON.stringify(this.hiddenQuotas)); cx.notify(); }).child(hidden ? "显示" : "隐藏")));
+          return v_flex().gap(3)
+            .child(h_flex().items_center().gap(3)
+              .child(div().flex_1().min_w(0).truncate().tooltip(label).text_size(9).text_color(t.dim).opacity(hidden ? 0.5 : 1).child(label))
+              .when(!this.editQuotas, row => row.child(text(value, t.foreground, 11).font_semibold())
+                .when(Boolean(window), detail => detail.child(text(pace === null ? "—" : `${pace > 0 ? "+" : ""}${pace}%`, pace !== null && pace < 0 ? t.blocked : t.muted, 9).tooltip("配速"))))
+              .when(this.editQuotas, row => row.child(div().id(`quota-visibility-${i}-${index}`).flex_none().cursor_pointer().px(4).py(2).rounded(4).bg(t.surface).text_size(10).text_color(t.accent).tooltip(hidden ? "显示此额度" : "隐藏此额度")
+                .on_click((_e, cx) => { this.hiddenQuotas = hidden ? this.hiddenQuotas.filter((item) => item !== key) : [...this.hiddenQuotas, key]; localStorage.setItem("magpie-live.hidden-quotas", JSON.stringify(this.hiddenQuotas)); cx.notify(); }).child(hidden ? "显示" : "隐藏"))))
+            .when(!this.editQuotas && Boolean(window) && remaining !== null, row => row.child(div().w_full().h(3).rounded(2).overflow_hidden().bg(t.border)
+              .child(div().w(`${remaining}%`).h_full().rounded(2).bg(remaining < 10 ? t.blocked : t.accent))));
         }));
     }).filter(Boolean);
     return groups.length ? h_flex().w_full().gap(6).items_start().children([0, 1].map((column) => v_flex().flex_1().min_w(0).gap(6).children(groups.filter((_group, index) => index % 2 === column)))) : text("额度已全部隐藏，点击管理恢复", t.dim, 10);
