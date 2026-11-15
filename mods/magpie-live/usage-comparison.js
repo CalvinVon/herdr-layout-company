@@ -44,3 +44,15 @@ export function usageComparison(usage, baseline, coverageSince, now = new Date()
     note,
   };
 }
+
+export function usageChartData(usage, baseline, comparable, metric, now = new Date()) {
+  const series = usage?.series ?? [];
+  const completed = usage?.period === 'today' ? Math.max(0, Math.min(24, Math.floor((now.getTime() - Date.parse(usage.since)) / 3600000))) : series.length;
+  const visible = usage?.period === 'today' ? series.slice(0, completed + 1) : series;
+  const offset = Math.max(0, visible.length - 30);
+  const value = (point) => metric === 'tokens' ? tokens(point) : Number(point[metric]) || 0;
+  return visible.slice(offset).map((point, index) => {
+    const previous = comparable && (usage.period !== 'today' || index + offset < completed) ? baseline?.series?.[index + offset] : null;
+    return { label: point.label, current: value(point), previous: previous ? value(previous) : null, previousLabel: previous?.label, unpriced: metric === 'cost' && Boolean(point.unpriced || previous?.unpriced) };
+  });
+}

@@ -1,10 +1,11 @@
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { home, readTextFile, theme, nextCommand, exec, focused, terminals, agents, layout } from "herdr";
-import { comparisonRange, usageComparison } from "./usage-comparison.js";
+import { comparisonRange, usageComparison, usageChartData } from "./usage-comparison.js";
 
 const BASE = "http://127.0.0.1:3425";
 const PERIODS = [["today", "今天"], ["7d", "7天"], ["30d", "30天"], ["all", "全部"]];
+const CHART_METRICS = [["calls", "请求"], ["tokens", "Token"], ["cost", "费用"]];
 const ICONS = { codex: "codex-color.svg", omp: "omp.svg", magpie: "magpie.svg", deepseek: "deepseek-color.svg", grok: "grok.svg", kimi: "kimi.svg", zcode: "zcode.png", "workbuddy-ai": "workbuddy-color.svg", "opencode-zen-free": "opencode.svg" };
 const card = (t) => v_flex().gap(7).p(10).rounded(8).bg(t.raised).border(1).border_color(t.border);
 const text = (value, color, size = 12) => div().text_size(size).text_color(color).child(String(value ?? ""));
@@ -48,6 +49,7 @@ export default class MagpieLive extends View {
     this.page = ["routing", "usage"].includes(localStorage.getItem("magpie-live.page")) ? localStorage.getItem("magpie-live.page") : "routing";
     this.period = PERIODS.some(([id]) => id === localStorage.getItem("magpie-live.period"))
       ? localStorage.getItem("magpie-live.period") : "today";
+    this.chartMetric = CHART_METRICS.some(([id]) => id === localStorage.getItem("magpie-live.chart-metric")) ? localStorage.getItem("magpie-live.chart-metric") : "calls";
     this.maskAccounts = localStorage.getItem("magpie-live.mask") !== "false";
     this.showRemaining = localStorage.getItem("magpie-live.remaining") !== "false";
     try { this.providerOrder = JSON.parse(localStorage.getItem("magpie-live.provider-order") || "[]"); } catch { this.providerOrder = []; }
@@ -379,6 +381,41 @@ export default class MagpieLive extends View {
     ]).when(Boolean(comparison), view => view.child(text(comparison.note, t.dim, 9)));
   }
 
+  usageChart(t) {
+    const usage = this.usage, metric = this.chartMetric;
+    const points = usageChartData(usage, this.comparisonCache?.baseline, Boolean(this.comparison), metric);
+    const max = Math.max(0, ...points.flatMap((point) => [point.current, point.previous ?? 0]));
+    const format = (value) => metric === "cost" ? `≈$${value.toFixed(value > 0 && value < 1 ? 3 : 2)}` : countTokens(value);
+    const hasPrevious = points.some((point) => point.previous !== null);
+    const partialCost = metric === "cost" && points.some((point) => point.unpriced);
+    const label = CHART_METRICS.find(([id]) => id === metric)?.[1] || "请求";
+    return v_flex().id("usage-chart").gap(6).p(8).rounded(8).bg(t.raised)
+      .child(h_flex().items_center().justify_between().gap(4)
+        .child(text("用量走势", t.foreground, 10).font_semibold())
+        .child(h_flex().gap(2).children(CHART_METRICS.map(([id, title]) => div().id(`usage-chart-${id}`).px(6).py(4).rounded(5).cursor_pointer().role("button").accessibility_label(`切换${title}走势`)
+          .bg(metric === id ? t.selected : t.raised).text_color(metric === id ? t.foreground : t.muted).text_size(9)
+          .on_click((_e, next) => { this.chartMetric = id; localStorage.setItem("magpie-live.chart-metric", id); next.notify(); }).child(title)))))
+      .when(!usage, view => view.child(text("等待用量数据", t.dim, 10)))
+      .when(Boolean(usage) && !points.length, view => view.child(text("当前周期暂无走势数据", t.dim, 10)))
+      .when(points.length > 0, view => view
+        .child(h_flex().items_center().gap(5).child(div().size(5).rounded(1).bg(t.accent)).child(text("本期", t.muted, 9))
+          .when(hasPrevious, row => row.child(div().size(5).rounded(1).bg(t.muted).opacity(0.45)).child(text(usage.period === "today" ? "昨日" : "前周期", t.muted, 9)))
+          .child(div().flex_1()).child(text(`最高 ${format(max)}`, t.dim, 9)))
+        .child(h_flex().id("usage-chart-bars").w_full().h(56).gap(1).items_end().border_b(1).border_color(t.border)
+          .role("image").accessibility_label(`${label}走势，${points.length}个时段，最高${format(max)}${hasPrevious ? "，包含前周期对照" : ""}`)
+          .children(points.map((point, i) => {
+            const describe = `${point.label || `时段 ${i + 1}`} · 本期 ${format(point.current)}${point.previous !== null ? ` · 对照 ${point.previousLabel || ""} ${format(point.previous)}` : ""}${point.unpriced ? " · 部分费用未计价" : ""}`;
+            const height = (value) => value > 0 && max > 0 ? Math.max(2, Math.round(value / max * 52)) : 0;
+            return h_flex().flex_1().min_w(0).h_full().gap(1).items_end().tooltip(describe)
+              .when(point.previous !== null, group => group.child(div().flex_1().min_w(0).h(height(point.previous)).rounded(1).bg(t.muted).opacity(0.45)))
+              .child(div().flex_1().min_w(0).h(height(point.current)).rounded(1).bg(t.accent));
+          })))
+        .child(h_flex().justify_between().child(text(points[0].label || "开始", t.dim, 9)).child(text(points[points.length - 1].label || "当前", t.dim, 9)))
+        .when(usage.period === "today" && hasPrevious, body => body.child(text("昨日仅显示已结束小时；本期含当前小时", t.dim, 9)))
+        .when(Boolean(usage.series?.length > 30), body => body.child(text("展示最近 30 个时段", t.dim, 9)))
+        .when(partialCost, body => body.child(text("部分费用未计价，图中仅含已计价金额", t.dim, 9))));
+  }
+
   render(cx) {
     const t = theme();
     const surface = t.surface.replace(/^#/, "");
@@ -543,7 +580,7 @@ export default class MagpieLive extends View {
         { id: "graph", name: "全部活动路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => div().flex().justify_center().child(graph) },
         { id: "quotas", name: "来源额度", extra: () => div().id("quota-manage").cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.editQuotas = !this.editQuotas; next.notify(); }).child(this.editQuotas ? "完成" : "隐藏 / 显示"),
           view: () => div().id("provider-quota-list").w_full().child(this.providerQuotas(t)) },
-        { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageOverview(t) },
+        { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => v_flex().gap(8).child(this.usageOverview(t)).child(this.usageChart(t)) },
         { id: "decisions", name: "实时路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(6)
           .when(!currentRoutes.length, body => body.child(v_flex().gap(5).p(10).rounded(8).bg(currentSession ? t.selected : light ? t.raised : t.surface)
             .when(Boolean(currentSession), card => card.border(1).border_color(t.border))
@@ -642,11 +679,6 @@ export default class MagpieLive extends View {
     const quotaViewButton = div().id("magpie-quota-view").px(7).py(5).rounded(5).bg(t.surface).text_color(t.muted).text_size(10)
       .on_click((_e, next) => { this.showRemaining = !this.showRemaining; localStorage.setItem("magpie-live.remaining", String(this.showRemaining)); next.notify(); })
       .child(this.showRemaining ? "剩余" : "已用");
-    const trend = (usage?.series ?? []).slice(-20).map((point, i, points) => {
-      const max = Math.max(1, ...points.map((p) => Number(p.calls) || 0));
-      const height = (Number(point.calls) || 0) > 0 ? Math.max(3, Math.round((Number(point.calls) || 0) / max * 34)) : 0;
-      return div().id(`usage-bar-${i}`).flex_1().h(height).rounded(2).bg(t.accent).tooltip(`${point.label}: ${point.calls} 请求`);
-    });
     return v_flex().id("magpie-live-root").size_full().min_h(0).bg(t.surface)
       .on_size_change((size, next) => { if (this.width !== size.width) { this.width = size.width; next.notify(); } })
       .child(header)
@@ -655,7 +687,7 @@ export default class MagpieLive extends View {
         .when(Boolean(this.error), body => body.child(card(t).child(text(`数据暂不可用 · 保留上次成功数据。${this.error}`, t.blocked, 10))))
         .child(heading("用量概览", `${usage?.since ? new Date(usage.since).toLocaleDateString() : ""}`))
         .child(this.usageOverview(t))
-        .child(card(t).child(heading("请求走势", "本周期")).child(h_flex().h(42).gap(2).items_end().children(trend)))
+        .child(this.usageChart(t))
         .child(heading("额度", `${this.quotas?.length ?? 0} 个来源`))
         .children(this.quotaCards(t))))
       .child(h_flex().justify_between().px(10).py(7).border_t(1).border_color(t.border)

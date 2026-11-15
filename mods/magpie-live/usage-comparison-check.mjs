@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('./usage-comparison.js', import.meta.url));
-const { usageComparison, comparisonRange } = await import(`data:text/javascript;base64,${source.toString('base64')}`);
+const { usageComparison, comparisonRange, usageChartData } = await import(`data:text/javascript;base64,${source.toString('base64')}`);
 
 const hour = (calls, i) => ({ time: `2026-11-15T${String(i).padStart(2, '0')}:00:00+08:00`, calls, input: calls, output: calls * 0.2, cache_read: calls * 0.8, cache_write: 0, cost: calls * 0.1, unpriced: 0 });
 const baseline = { period: '2026-11-14..2026-11-14', since: '2026-11-14T00:00:00+08:00', bucket: 'hour', series: Array.from({ length: 24 }, (_, i) => hour(10, i)) };
@@ -24,4 +24,17 @@ assert.equal(usageComparison({ ...week, period: 'all' }, previousWeek, '2026-11-
 assert.equal(usageComparison({ ...week, unpriced: 1 }, previousWeek, '2026-11-01T00:00:00+08:00', now).cost, '费用部分未计价');
 assert.equal(usageComparison(week, { ...previousWeek, calls: 0 }, '2026-11-01T00:00:00+08:00', now).calls, '前7天基准为0');
 assert.equal(usageComparison(today, baseline, '2026-11-01T00:00:00+08:00', new Date('2026-11-15T00:30:00+08:00')), null);
+assert.equal(typeof usageChartData, 'function', 'usage trend data is available');
+const chart = usageChartData(today, baseline, true, 'calls', now);
+assert.equal(chart.length, 13, 'today includes the current hour but not future hours');
+assert.equal(chart[11].previous, 10);
+assert.equal(chart[12].previous, null, 'previous current hour is excluded');
+assert.equal(usageChartData(today, baseline, true, 'tokens', now)[0].current, 30);
+assert.equal(usageChartData(today, baseline, false, 'cost', now)[0].previous, null);
+assert.equal(usageChartData({ period: 'all', series: Array.from({length: 40}, (_, i) => ({calls: i})) }, null, false, 'calls', now).length, 30);
+const days = { ...week, series: [{ label: 'Nov 9', calls: 3, cost: 0.5, unpriced: 1 }, { label: 'Nov 10', calls: 0, cost: 0 }] };
+const earlier = { ...previousWeek, series: [{ label: 'Nov 2', calls: 5, cost: 1 }, { label: 'Nov 3', calls: 2, cost: 0.2 }] };
+assert.deepEqual(usageChartData(days, earlier, true, 'calls', now).map(point => [point.current, point.previous]), [[3, 5], [0, 2]]);
+assert.equal(usageChartData(days, earlier, true, 'cost', now)[0].unpriced, true);
+assert.equal(usageChartData(null, null, false, 'calls', now).length, 0);
 console.log('usage comparison checks passed');
