@@ -1,7 +1,7 @@
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { home, readTextFile, theme, nextCommand, exec, focused, terminals, agents, layout } from "herdr";
-import { comparisonRange, usageComparison, usageChartData } from "./usage-comparison.js";
+import { comparisonRange, usageComparison, usageChartData, usageChartPeriod } from "./usage-comparison.js";
 
 const BASE = "http://127.0.0.1:3425";
 const PERIODS = [["today", "今天"], ["7d", "7天"], ["30d", "30天"], ["all", "全部"]];
@@ -50,6 +50,9 @@ export default class MagpieLive extends View {
     this.period = PERIODS.some(([id]) => id === localStorage.getItem("magpie-live.period"))
       ? localStorage.getItem("magpie-live.period") : "today";
     this.chartMetric = CHART_METRICS.some(([id]) => id === localStorage.getItem("magpie-live.chart-metric")) ? localStorage.getItem("magpie-live.chart-metric") : "calls";
+    this.chartGranularity = ["hour", "day"].includes(localStorage.getItem("magpie-live.chart-granularity")) ? localStorage.getItem("magpie-live.chart-granularity") : this.period === "today" ? "hour" : "day";
+    this.chartUsage = null;
+    this.chartError = "";
     this.maskAccounts = localStorage.getItem("magpie-live.mask") !== "false";
     this.showRemaining = localStorage.getItem("magpie-live.remaining") !== "false";
     try { this.providerOrder = JSON.parse(localStorage.getItem("magpie-live.provider-order") || "[]"); } catch { this.providerOrder = []; }
@@ -110,6 +113,7 @@ export default class MagpieLive extends View {
         const command = await nextCommand();
         if (command === "routing" || command === "usage") this.setPage(command, next);
         else if (PERIODS.some(([id]) => id === command)) this.setPeriod(command, next);
+        else if (command === "chart-hour" || command === "chart-day") this.setChartGranularity(command === "chart-hour" ? "hour" : "day", next);
         else if (command === "refresh") { this.historyAt = 0; this.refresh(next); }
         else if (command === "mask") { this.maskAccounts = !this.maskAccounts; localStorage.setItem("magpie-live.mask", String(this.maskAccounts)); }
         else if (command === "remaining") { this.showRemaining = !this.showRemaining; localStorage.setItem("magpie-live.remaining", String(this.showRemaining)); }
@@ -121,7 +125,8 @@ export default class MagpieLive extends View {
   refresh(cx) {
     if (this.reading) return;
     this.reading = true;
-    const period = this.period;
+    const period = this.period, granularity = this.chartGranularity;
+    const chartPeriod = usageChartPeriod(period, granularity);
     cx.spawn(async (next) => {
       try {
         if (!this.configDir) {
@@ -187,11 +192,12 @@ export default class MagpieLive extends View {
             return response.ok ? response.json() : null;
           } catch { return null; }
         };
-        const [usageRes, quotaRes, activeRes, history] = await Promise.all([
+        const [usageRes, quotaRes, activeRes, history, chartRes] = await Promise.all([
           fetch(periodPath(this.base, period)),
           fetch(`${this.base}/v1/magpie/quotas`),
           fetch(`${this.base}/v1/magpie/concurrency`),
           readHistory(),
+          chartPeriod === period ? null : fetch(periodPath(this.base, chartPeriod)).catch(() => null),
         ]);
         for (const response of [usageRes, quotaRes, activeRes]) {
           if (!response.ok) throw new Error(`Magpie HTTP ${response.status}`);
@@ -199,6 +205,7 @@ export default class MagpieLive extends View {
         const [usage, quota, active] = await Promise.all([
           usageRes.json(), quotaRes.json(), activeRes.json(),
         ]);
+        const chartUsage = chartPeriod === period ? usage : chartRes?.ok ? await chartRes.json().catch(() => null) : null;
         const range = comparisonRange(usage);
         if (range && period === this.period) {
           const key = `${this.base}|${range}`;
@@ -225,6 +232,10 @@ export default class MagpieLive extends View {
           this.comparison = range && this.comparisonCache?.key === `${this.base}|${range}`
             ? usageComparison(usage, this.comparisonCache.baseline, this.comparisonCache.since) : null;
         }
+        if (period === this.period && granularity === this.chartGranularity) {
+          this.chartUsage = chartUsage?.period === chartPeriod ? chartUsage : null;
+          this.chartError = this.chartUsage ? "" : "走势数据暂不可用";
+        }
         this.quotas = quota.data ?? [];
         this.active = active.active ?? [];
         if (!this.active.length) this.motionView.set_props({ paths: [], start: this.motionStart });
@@ -236,7 +247,7 @@ export default class MagpieLive extends View {
       } finally {
         this.reading = false;
         next.notify();
-        if (period !== this.period) this.refresh(next);
+        if (period !== this.period || granularity !== this.chartGranularity) this.refresh(next);
       }
     });
   }
@@ -252,7 +263,19 @@ export default class MagpieLive extends View {
     this.period = period;
     localStorage.setItem("magpie-live.period", period);
     this.usage = null;
+    this.chartUsage = null;
+    this.chartError = "";
     this.comparison = null;
+    this.refresh(cx);
+    cx.notify();
+  }
+
+  setChartGranularity(granularity, cx) {
+    if (this.chartGranularity === granularity) return;
+    this.chartGranularity = granularity;
+    this.chartUsage = null;
+    this.chartError = "";
+    localStorage.setItem("magpie-live.chart-granularity", granularity);
     this.refresh(cx);
     cx.notify();
   }
@@ -382,19 +405,27 @@ export default class MagpieLive extends View {
   }
 
   usageChart(t) {
-    const usage = this.usage, metric = this.chartMetric;
-    const points = usageChartData(usage, this.comparisonCache?.baseline, Boolean(this.comparison), metric);
+    const usage = this.chartUsage, metric = this.chartMetric;
+    const chartPeriod = usageChartPeriod(this.period, this.chartGranularity);
+    const rangeLabel = chartPeriod === "today" ? "今天" : chartPeriod === "7d" ? "近 7 天" : "近 30 天";
+    const comparable = usage?.period === this.usage?.period && Boolean(this.comparison);
+    const points = usageChartData(usage, this.comparisonCache?.baseline, comparable, metric);
     const max = Math.max(0, ...points.flatMap((point) => [point.current, point.previous ?? 0]));
     const format = (value) => metric === "cost" ? `≈$${value.toFixed(value > 0 && value < 1 ? 3 : 2)}` : countTokens(value);
     const hasPrevious = points.some((point) => point.previous !== null);
     const partialCost = metric === "cost" && points.some((point) => point.unpriced);
     const label = CHART_METRICS.find(([id]) => id === metric)?.[1] || "请求";
     return v_flex().id("usage-chart").gap(6).p(8).rounded(8).bg(t.raised)
+      .child(h_flex().items_center().justify_between().gap(4)
+        .child(text(rangeLabel, t.muted, 9))
+        .child(h_flex().gap(2).children([["hour", "按小时"], ["day", "按天"]].map(([id, title]) => div().id(`usage-granularity-${id}`).px(6).py(4).rounded(5).cursor_pointer().role("button").accessibility_label(`切换${title}走势`)
+          .bg(this.chartGranularity === id ? t.selected : t.raised).text_color(this.chartGranularity === id ? t.foreground : t.muted).text_size(9)
+          .on_click((_e, next) => this.setChartGranularity(id, next)).child(title)))))
       .child(h_flex().items_center().justify_end().gap(4)
         .child(h_flex().gap(2).children(CHART_METRICS.map(([id, title]) => div().id(`usage-chart-${id}`).px(6).py(4).rounded(5).cursor_pointer().role("button").accessibility_label(`切换${title}走势`)
           .bg(metric === id ? t.selected : t.raised).text_color(metric === id ? t.foreground : t.muted).text_size(9)
           .on_click((_e, next) => { this.chartMetric = id; localStorage.setItem("magpie-live.chart-metric", id); next.notify(); }).child(title)))))
-      .when(!usage, view => view.child(text("等待用量数据", t.dim, 10)))
+      .when(!usage, view => view.child(text(this.chartError || "等待用量数据", this.chartError ? t.blocked : t.dim, 10)))
       .when(Boolean(usage) && !points.length, view => view.child(text("当前周期暂无走势数据", t.dim, 10)))
       .when(points.length > 0, view => view
         .child(h_flex().items_center().gap(5).child(div().size(5).rounded(1).bg(t.accent)).child(text("本期", t.muted, 9))
@@ -579,7 +610,7 @@ export default class MagpieLive extends View {
         { id: "quotas", name: "来源额度", extra: () => div().id("quota-manage").cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.editQuotas = !this.editQuotas; next.notify(); }).child(this.editQuotas ? "完成" : "隐藏 / 显示"),
           view: () => div().id("provider-quota-list").w_full().child(this.providerQuotas(t)) },
         { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageOverview(t) },
-        { id: "usage-trend", name: "用量走势", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageChart(t) },
+        { id: "usage-trend", name: "用量走势", extra: () => text(this.chartGranularity === "hour" ? "按小时" : "按天", t.dim, 10), view: () => this.usageChart(t) },
         { id: "decisions", name: "实时路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(6)
           .when(!currentRoutes.length, body => body.child(v_flex().gap(5).p(10).rounded(8).bg(currentSession ? t.selected : light ? t.raised : t.surface)
             .when(Boolean(currentSession), card => card.border(1).border_color(t.border))
@@ -690,7 +721,7 @@ export default class MagpieLive extends View {
         .when(Boolean(this.error), body => body.child(card(t).child(text(`数据暂不可用 · 保留上次成功数据。${this.error}`, t.blocked, 10))))
         .child(heading("用量概览", `${usage?.since ? new Date(usage.since).toLocaleDateString() : ""}`))
         .child(this.usageOverview(t))
-        .child(heading("用量走势", PERIODS.find(([id]) => id === this.period)?.[1] || "本期"))
+        .child(heading("用量走势", this.chartGranularity === "hour" ? "按小时" : "按天"))
         .child(this.usageChart(t))
         .child(heading("额度", `${this.quotas?.length ?? 0} 个来源`))
         .children(this.quotaCards(t))))

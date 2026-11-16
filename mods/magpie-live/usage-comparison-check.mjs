@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('./usage-comparison.js', import.meta.url));
-const { usageComparison, comparisonRange, usageChartData } = await import(`data:text/javascript;base64,${source.toString('base64')}`);
+const { usageComparison, comparisonRange, usageChartData, usageChartPeriod } = await import(`data:text/javascript;base64,${source.toString('base64')}`);
 
 const hour = (calls, i) => ({ time: `2026-11-15T${String(i).padStart(2, '0')}:00:00+08:00`, calls, input: calls, output: calls * 0.2, cache_read: calls * 0.8, cache_write: 0, cost: calls * 0.1, unpriced: 0 });
 const baseline = { period: '2026-11-14..2026-11-14', since: '2026-11-14T00:00:00+08:00', bucket: 'hour', series: Array.from({ length: 24 }, (_, i) => hour(10, i)) };
 const today = { period: 'today', since: '2026-11-15T00:00:00+08:00', bucket: 'hour', series: Array.from({ length: 24 }, (_, i) => hour(15, i)) };
 const now = new Date('2026-11-15T12:30:00+08:00');
+assert.equal(typeof usageChartPeriod, 'function', 'chart granularity selects the correct data');
+assert.equal(usageChartPeriod('today', 'hour'), 'today');
+assert.equal(usageChartPeriod('7d', 'hour'), 'today');
+assert.equal(usageChartPeriod('today', 'day'), '7d');
+assert.equal(usageChartPeriod('7d', 'day'), '7d');
+assert.equal(usageChartPeriod('30d', 'day'), '30d');
+assert.equal(usageChartPeriod('all', 'day'), '30d');
 assert.equal(usageComparison(today, baseline, '2026-11-01T00:00:00+08:00', now), null);
 assert.equal(comparisonRange(today), null);
 const week = { period: '7d', since: '2026-11-09T00:00:00+08:00', calls: 770, input: 770, output: 154, cache_read: 616, cache_write: 0, cost: 77, unpriced: 0 };

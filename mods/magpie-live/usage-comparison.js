@@ -35,6 +35,11 @@ export function usageComparison(usage, baseline, coverageSince) {
   };
 }
 
+export function usageChartPeriod(period, granularity) {
+  if (granularity === 'hour') return 'today';
+  return period === '30d' || period === 'all' ? '30d' : '7d';
+}
+
 export function usageChartData(usage, baseline, comparable, metric, now = new Date()) {
   const series = usage?.series ?? [];
   const completed = usage?.period === 'today' ? Math.max(0, Math.min(24, Math.floor((now.getTime() - Date.parse(usage.since)) / 3600000))) : series.length;
