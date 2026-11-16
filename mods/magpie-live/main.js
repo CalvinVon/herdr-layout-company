@@ -95,17 +95,22 @@ export default class MagpieLive extends View {
     this.motionPaths = [];
     this.motionHasPaths = false;
     this.motionView = cx.new(RouteDots, { paths: [], start: this.motionStart });
+    const visible = () => { const panel = layout()?.children?.find((node) => node.id === "magpie-panel"); return Boolean(panel) && !panel.hidden; };
     cx.timer.every(160, () => {
       if (this.page !== "routing" || this.hiddenSections.includes("graph") || (!this.motionPaths.length && !this.motionHasPaths)) return;
-      const panel = layout()?.children?.find((node) => node.id === "magpie-panel");
-      if (panel && !panel.hidden) {
-        this.motionView.set_props({ paths: this.motionPaths, start: this.motionStart, now: Date.now(), width: this.motionWidth, height: this.motionHeight });
-        this.motionHasPaths = this.motionPaths.length > 0;
-      }
+      if (!visible() || !globalThis.window.is_window_active()) return;
+      this.motionView.set_props({ paths: this.motionPaths, start: this.motionStart, now: Date.now(), width: this.motionWidth, height: this.motionHeight });
+      this.motionHasPaths = this.motionPaths.length > 0;
     });
     cx.timer.every(5000, (next) => {
-      const panel = layout()?.children?.find((node) => node.id === "magpie-panel");
-      if (!panel?.hidden) this.refresh(next);
+      if (visible() && globalThis.window.is_window_active()) this.refresh(next);
+      else this.refreshDeferred = true;
+    });
+    cx.timer.every(1000, (next) => {
+      if (this.refreshDeferred && visible() && globalThis.window.is_window_active() && Date.now() - (this.readAt ?? 0) > 5000) {
+        this.refreshDeferred = false;
+        this.refresh(next);
+      }
     });
     if (!layout()?.children?.find((node) => node.id === "magpie-panel")?.hidden) this.refresh(cx);
     cx.spawn(async (next) => {
@@ -136,8 +141,12 @@ export default class MagpieLive extends View {
         const configDir = this.configDir;
         const settingsText = await readTextFile(`${configDir}/settings.json`);
         const providersText = await readTextFile(`${configDir}/providers.json`);
-        const groups = providersText ? (JSON.parse(providersText).groups ?? []) : [];
-        this.groupNames = Object.fromEntries(groups.map((group) => [group.id, group.name || group.id]));
+        if (settingsText !== this.settingsText || providersText !== this.providersText) {
+          this.settingsText = settingsText;
+          this.providersText = providersText;
+          const groups = providersText ? (JSON.parse(providersText).groups ?? []) : [];
+          this.groupNames = Object.fromEntries(groups.map((group) => [group.id, group.name || group.id]));
+        }
         const port = Number(settingsText ? (JSON.parse(settingsText).port ?? 3425) : 3425);
         if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Magpie 网关端口无效");
         this.base = `http://127.0.0.1:${port}`;
@@ -146,17 +155,23 @@ export default class MagpieLive extends View {
         const terminal = terminals().find((item) => item.address === focusTerminal);
         const pid = terminal?.foreground?.pid;
         this.focusTerminal = focusTerminal;
-        this.focusSession = null;
-        if (pid && !String(focusTerminal).includes("/")) {
-          try {
-            const files = await exec("/usr/sbin/lsof", ["-Fn", "-p", String(pid)]);
-            const lines = files.stdout.split("\n");
-            const ids = (pattern) => [...new Set(lines.flatMap((line) => { const match = line.match(pattern); return match ? [match[1]] : []; }))];
-            const sessions = ids(/\/sessions\/.*?([0-9a-f-]{36})\.jsonl$/i);
-            const owners = ids(/\/session-owners\/([0-9a-f-]{36})\.lock$/i);
-            if (sessions.length === 1) this.focusSession = sessions[0];
-            else if (!sessions.length && owners.length === 1) this.focusSession = owners[0];
-          } catch { /* The terminal may not expose a session file. */ }
+        const lookup = pid ? `${focusTerminal}|${pid}` : null;
+        if (lookup && lookup === this.sessionLookup?.key) {
+          this.focusSession = this.sessionLookup.session;
+        } else {
+          this.focusSession = null;
+          if (lookup && !focusTerminal.includes("/")) {
+            try {
+              const files = await exec("/usr/sbin/lsof", ["-Fn", "-p", String(pid)]);
+              const lines = files.stdout.split("\n");
+              const ids = (pattern) => [...new Set(lines.flatMap((line) => { const match = line.match(pattern); return match ? [match[1]] : []; }))];
+              const sessions = ids(/\/sessions\/.*?([0-9a-f-]{36})\.jsonl$/i);
+              const owners = ids(/\/session-owners\/([0-9a-f-]{36})\.lock$/i);
+              if (sessions.length === 1) this.focusSession = sessions[0];
+              else if (!sessions.length && owners.length === 1) this.focusSession = owners[0];
+            } catch { /* The terminal may not expose a session file. */ }
+            this.sessionLookup = { key: lookup, session: this.focusSession };
+          }
         }
         if (!this.recentReading) {
           this.recentReading = true;
@@ -246,7 +261,11 @@ export default class MagpieLive extends View {
         this.error = error instanceof Error ? error.message : "Magpie 暂不可用";
       } finally {
         this.reading = false;
-        next.notify();
+        const signature = JSON.stringify([this.usage, this.quotas, this.active, this.routes, this.recent, this.error]);
+        if (signature !== this.dataSignature) {
+          this.dataSignature = signature;
+          next.notify();
+        }
         if (period !== this.period || granularity !== this.chartGranularity) this.refresh(next);
       }
     });

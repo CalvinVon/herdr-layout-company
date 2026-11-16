@@ -82,10 +82,14 @@ assert.equal(groupPaths([emptySpace], [...emptyPanes, pane('mixed-terminal', 'sp
 assert.equal(rules.normalizePath('/repo/./child/../'), '/repo');
 for (const mod of ['agent-columns', 'agent-columns-spaces']) {
   const helper = fs.readFileSync(path.join(__dirname, '..', mod, 'sidebar-collapse.js'), 'utf8');
-  let tree = { id: 'root', children: [{ id: 'spaces', size: { weight: 1.5 }, min: 130 }, { id: 'agents', size: { px: 420 }, min: 220, max: 900 }] };
+  let tree = { id: 'root', children: [{ id: 'spaces', size: { weight: 1.5 }, min: 38 }, { id: 'agents', size: { px: 420 }, min: 40 }] };
   const saved = new Map([['layout', 'office']]);
-  /** @param {string} command @param {{layout: any}} args */
-  const dispatch = (command, args) => { assert.equal(command, 'layout.set'); tree = args.layout; };
+  /** @param {string} command @param {{id: string, px?: number, weight?: number}} args */
+  const dispatch = (command, args) => {
+    assert.equal(command, 'layout.resize');
+    const block = tree.children.find(child => child.id === args.id);
+    block.size = args.px !== undefined ? { px: args.px } : { weight: args.weight };
+  };
   /** @param {string} key */
   const get = key => saved.get(key);
   /** @param {string} key @param {any} value */
@@ -96,14 +100,16 @@ for (const mod of ['agent-columns', 'agent-columns-spaces']) {
   const before = structuredClone(tree);
   toggleBlock('spaces');
   assert.equal(blockCollapsed('spaces'), true);
-  assert.deepEqual(tree.children[0], { id: 'spaces', size: { px: 38 }, min: 38, max: 38 });
+  assert.deepEqual(tree.children[0], { id: 'spaces', size: { px: 38 }, min: 38 });
   assert.deepEqual(tree.children[1], before.children[1]);
   toggleBlock('agents');
   assert.equal(blockCollapsed('agents'), true);
+  assert.deepEqual(tree.children[1], { id: 'agents', size: { px: 40 }, min: 40 });
   toggleBlock('spaces');
+  assert.equal(blockCollapsed('spaces'), false);
   assert.deepEqual(tree.children[0], before.children[0]);
   toggleBlock('agents');
-  assert.deepEqual(tree, before);
+  assert.equal(blockCollapsed('agents'), false);
   toggleBlock('missing');
   assert.deepEqual(tree, before);
 }

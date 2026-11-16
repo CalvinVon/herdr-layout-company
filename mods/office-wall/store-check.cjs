@@ -1,0 +1,17 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const file = path.join(__dirname, 'store.js');
+const source = fs.readFileSync(file, 'utf8').replace(/^export /gm, '');
+const { updatePins, parsePins } = new Function(source + '\nreturn {updatePins,parsePins};')();
+const a = { id: 'a', name: 'Local', url: 'https://example.com/' };
+const b = { id: 'b', name: 'Network', url: 'https://example.org/' };
+const saved = updatePins([], { type: 'save', card: a });
+assert.deepEqual(saved, [a]);
+assert.deepEqual(updatePins([a, b], { type: 'remove', id: 'a' }), [b]);
+assert.deepEqual(updatePins([a, b], { type: 'save', card: { ...a, name: 'Updated' } }), [{ ...a, name: 'Updated' }, b]);
+const notes = JSON.stringify({ version: 1, rooms: { alpha: [{ id: 'n1', name: '结论', url: '', kind: 'note', text: '需要确认接口' }, { id: 'f1', name: '报告', url: '', kind: 'file', path: '/tmp/report.html' }] } });
+assert.equal(parsePins(notes).rooms.alpha.length, 2);
+assert.throws(() => parsePins(JSON.stringify({ version: 1, rooms: { alpha: [{ id: 'n', name: '结论', url: '', kind: 'note' }] } })));
+assert.throws(() => parsePins(JSON.stringify({ version: 1, rooms: { alpha: [{ id: 'f', name: '报告', url: '', kind: 'file', path: 'relative.html' }] } })));
+console.log('Pinned card checks passed.');

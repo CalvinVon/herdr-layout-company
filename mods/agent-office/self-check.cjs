@@ -33,6 +33,7 @@ const A = load('art.js', { div: element });
 const D = load('decor.js', { div: element, A, run() {} });
 const T = load('themes.js', { div: element, A, D });
 const model = load('projects.js', {});
+const S = load('wall-services.js', {});
 /** @type {any[]} */
 const agents = [
   { address: 'a', pane: 'pane-a', status: 'idle', focused: true, space_name: 'repo', tab: 'shared-tab' },
@@ -55,9 +56,12 @@ let focus = { pane: 'pane-a', space: 'space-a' };
 const noRows = () => [];
 /** @type {Record<string, any>} */
 const sharedValues = {};
-const env = { ...model, View: class {}, div: element, svg: element, A, T, D, agents: () => agents, terminals: noRows, spaces: noRows, panes: noRows,
+const openedFiles = [];
+let zoom = 1;
+globalThis.window = { paint_path: () => element(), is_window_active: () => true };
+const env = { ...model, View: class {}, div: element, svg: element, Scrollbar: { vertical: element }, PathBuilder: { fill: () => ({ add_polygon() {}, build: () => ({}) }) }, A, T, D, S, agents: () => agents, terminals: noRows, spaces: noRows, panes: noRows, machines: noRows,
   focused: () => focus, shared: (/** @type {string} */ key) => key === 'workspace.office-groups' ? groups : sharedValues[key],
-  setShared(/** @type {string} */ key, /** @type {any} */ value) { sharedValues[key] = value; }, run() {} };
+  setShared(/** @type {string} */ key, /** @type {any} */ value) { sharedValues[key] = value; }, run() {}, openOverlay() {}, exec(command, args) { openedFiles.push({ command, args }); return Promise.resolve({ code: 0 }); }, window: () => ({ platform: 'macos' }), settings: () => ({ zoom }), hc() {}, writeTextFile() {} };
 const Office = load('main.js', env).default;
 const cx = { timer: { every() {}, after() {} }, notify() {}, spawn() {} };
 const office = new Office(); office.init({}, cx);
@@ -66,6 +70,17 @@ Object.assign(office, {
   /** @param {string} address @param {string} spot @param {number} x @param {number} y */
   walk(address, spot, x, y) { return (office.at[address] = { spot, x, y }); },
 });
+const initialSize = office.size;
+let measuredRoom;
+office.room = (width, height) => { measuredRoom = { width, height }; return []; };
+office.size = { width: 900, height: 225 };
+zoom = 0.9;
+office.render(cx);
+assert.equal(measuredRoom.height, 250, 'zoomed viewport height is converted back to design units');
+assert.ok(measuredRoom.width >= 1000, 'zoomed viewport width is converted back to design units');
+zoom = 1;
+office.size = initialSize;
+office.room = noRows;
 /** @param {any} node @returns {string[]} */
 function lamps(node) { return [...(node?.props?.id?.startsWith('desk-lamp-') ? [node.props.id] : []), ...(node?.nodes ?? []).flatMap(lamps)]; }
 /** @param {number} hour @param {number} [minute] */
@@ -103,6 +118,11 @@ assert.equal(selection.choose(rooms(), { pane: 'pane-c', space: 'space-c' }, nul
 assert.equal(selection.choose(rooms(), { pane: 'pane-c', space: 'space-c' }, { id: 'empty', token: 1 }).id, 'empty');
 assert.equal(selection.choose(rooms(), { pane: 'pane-c', space: 'space-c' }, { id: 'empty', token: 2 }).id, 'empty');
 assert.equal(model.projectRooms(groups, agents, T.themeFor, { alpha: { pane: 'closed' } }).find((/** @type {any} */ room) => room.id === 'alpha').target.pane, 'pane-b');
+sharedValues['agent-office.requested-project'] = { id: 'empty', token: 99 };
+const reopened = new Office(); reopened.init({}, cx);
+const reopenedRooms = model.projectRooms(groups, agents, T.themeFor, reopened.projectSelection.targets);
+assert.equal(reopened.projectSelection.choose(reopenedRooms, { pane: 'pane-a', space: 'space-a' }, sharedValues['agent-office.requested-project']).id, 'alpha');
+delete sharedValues['agent-office.requested-project'];
 const partyOffice = new Office(); partyOffice.init({}, cx); partyOffice.useProject({ id: 'alpha' });
 const now = Date.now(); partyOffice.finishes = [now, now, now];
 /** @type {any[]} */
@@ -144,6 +164,51 @@ const wallRoot = { nodes: wall };
 const numberAt = (/** @type {string} */ id) => Number(text(find(wallRoot, id)).match(/\d+\s*$/)?.[0]);
 assert.equal(numberAt('office-count-working'), 0); assert.equal(numberAt('office-count-blocked'), 1);
 assert.equal(numberAt('office-count-idle'), 0); assert.equal(numberAt('office-count-napping'), 1); assert.equal(numberAt('office-count-interns'), 1);
+assert.ok(find(wallRoot, 'office-service-wall'));
+const originalWallProject = office.currentProject;
+office.currentProject = { ...originalWallProject, projectKey: 'local:test', machine: null };
+office.wallCards['local:test'] = { t1: { id: 't1', name: 'web', status: 'running', urls: ['http://localhost:8081/'], qr: Array.from({ length: 21 }, () => Array(21).fill(true)) } };
+const serviceWall = { nodes: office.room(1400, 250, T.officeGeometry(1400, 250, 3, office.currentProject), { top: '#abc', bottom: '#def' }, [], [], Date.now(), null) };
+assert.ok(text(serviceWall).includes('http://localhost:8081/'));
+assert.ok(find(serviceWall, 'office-wall-qr'));
+const wallBoard = find(serviceWall, 'office-service-wall');
+const wallFixtures = find(serviceWall, 'wall-fixtures');
+assert.equal(wallBoard.props.left + wallBoard.props.w + 12, wallFixtures.props.left);
+office.wallCards['local:test'].t1.qr = Array.from({ length: 37 }, () => Array(37).fill(true));
+const compactWall = { nodes: office.room(1400, 209, T.officeGeometry(1400, 209, 3, office.currentProject), { top: '#abc', bottom: '#def' }, [], [], Date.now(), null) };
+assert.ok(find(compactWall, 'office-wall-qr').props.size >= 90);
+office.wallCards['local:test'] = {
+  web: { id: 'web', name: 'web', urls: ['http://localhost:8081/', 'http://192.0.2.1:8081/'] },
+  drn: { id: 'drn', name: 'drn', urls: ['http://192.0.2.1:3000/'], qr: Array.from({ length: 21 }, () => Array(21).fill(true)) },
+};
+const pairedWall = { nodes: office.room(1400, 250, T.officeGeometry(1400, 250, 3, office.currentProject), { top: '#abc', bottom: '#def' }, [], [], Date.now(), null) };
+assert.ok(text(pairedWall).includes('http://192.0.2.1:3000/'));
+assert.ok(text(pairedWall).includes('http://localhost:8081/'));
+assert.ok(text(pairedWall).includes('drn'));
+office.wallExtras = { 'local:test': [{ id: 'goal:t1', kind: 'goal', name: '当前会话目标', text: '修复二维码', tasks: [{ text: '检查二维码', status: 'done' }, { text: '验证长任务可以换行显示', status: 'in_progress' }] }, { id: 'agent:1', kind: 'note', name: '关键结论', text: '接口已确认', published: true }, { id: 'agent:2', kind: 'file', name: '可视化报告', path: '/tmp/report.html', source: 'Agent · t1', published: true }] };
+const extendedWall = { nodes: office.room(1600, 250, T.officeGeometry(1600, 250, 3, office.currentProject), { top: '#abc', bottom: '#def' }, [], [], Date.now(), null) };
+assert.ok(text(extendedWall).includes('修复二维码'));
+assert.ok(text(extendedWall).includes('接口已确认'));
+assert.ok(text(extendedWall).includes('可视化报告'));
+assert.ok(text(extendedWall).includes('终端原码'));
+assert.ok(text(extendedWall).includes('Agent · t1'));
+const todoBoard = find(extendedWall, 'office-todo-board');
+const todoScroll = find(todoBoard, 'office-todo-scroll');
+const goalCard = find(extendedWall, 'office-wall-card-0');
+assert.ok(todoScroll && find(todoScroll, 'office-todo-0') && find(todoScroll, 'office-todo-1'));
+assert.ok(text(todoScroll).includes('检查二维码') && text(todoScroll).includes('验证长任务可以换行显示'));
+assert.ok(!text(goalCard).includes('检查二维码'));
+assert.ok(!text(extendedWall).includes('点击查看全部'));
+let scrollStopped = false;
+todoBoard.props.on_scroll_wheel({}, { stop_propagation() { scrollStopped = true; } });
+assert.equal(scrollStopped, true);
+const fileCard = find(extendedWall, 'office-wall-card-4');
+assert.ok(fileCard && typeof fileCard.props.on_click === 'function');
+let stopped = false;
+fileCard.props.on_click({}, { stop_propagation() { stopped = true; }, spawn(fn) { fn({ notify() {} }); } });
+assert.equal(stopped, true);
+assert.deepEqual(openedFiles.at(-1), { command: 'open', args: ['/tmp/report.html'] });
+office.currentProject = originalWallProject;
 assert.ok(text(wallRoot).includes(wallAgents[0].space_name));
 assert.ok(find(wallRoot, 'office-party')); assert.ok(find(wallRoot, 'call-remote/t1'));
 office.party = null;
@@ -208,4 +273,11 @@ function find(node, id) { return node?.props?.id === id ? node : (node?.nodes ??
 const betaIndex = office.overviewSnapshot.findIndex((/** @type {any} */ room) => room.id === 'beta');
 find(B.officeMiniMap(office.overviewSnapshot, 250), `office-mini-room-${betaIndex}`).props.on_click();
 scene(23); assert.equal(office.currentProject.id, 'beta');
+office.size.width = 500;
+const sceneView = find(scene(23), 'office-scene');
+sceneView.props.on_scroll_wheel({ delta: { x: 0, y: -100 }, bounds: { width: 500 } }, cx);
+assert.equal(office.sceneOffset, 100);
+assert.equal(find(scene(23), 'office-scene').nodes[0].props.left, -100);
+sceneView.props.on_scroll_wheel({ delta: { x: 0, y: 10000 }, bounds: { width: 500 } }, cx);
+assert.equal(office.sceneOffset, 0);
 weatherVerification.then(() => console.log('Passed: grounded desk geometry, restored live-state wall fixtures, seasonal conditions, weather error retention, project navigation and day/night lighting.')).catch(error => { console.error(error); process.exitCode = 1; });

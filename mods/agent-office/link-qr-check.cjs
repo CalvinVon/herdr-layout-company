@@ -1,0 +1,12 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const helper = path.join(__dirname, 'link-qr.cjs');
+assert.ok(fs.existsSync(helper), 'Link QR helper must exist');
+const { makeUrlQR } = require(helper);
+const result = makeUrlQR(['http://localhost:8081/', 'http://192.0.2.1:8081/']);
+assert.equal(result.url, 'http://192.0.2.1:8081/');
+assert.ok(Array.isArray(result.qr) && result.qr.length >= 21);
+assert.ok(result.qr.every(row => row.length === result.qr.length && row.every(bit => typeof bit === 'boolean')));
+assert.equal(makeUrlQR([]), null);
+console.log('Direct link QR fallback checks passed.');

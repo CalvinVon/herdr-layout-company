@@ -1,7 +1,7 @@
 // A lazy file browser for the focused pane's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, shared, setShared, notify } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, shared, setShared, notify, props } from "herdr";
 
 function location() {
   const space = spaces().find(s => s.active), f = focused();
@@ -203,7 +203,7 @@ export default class Files extends View {
   render(cx) {
     if (key() !== this.context?.key) this.refresh(cx);
     const requested = shared("files-markdown.open");
-    if (typeof requested === "string") {
+    if (typeof requested === "string" && (shared("project-tabs.panel-mode") !== "floating" || props()?.floating)) {
       setShared("files-markdown.open", null);
       if (requested.startsWith("file:///")) this.openLink(requested, cx);
       else this.show(requested, cx);

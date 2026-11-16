@@ -29,10 +29,10 @@ const sessionIcon = (pane, status, id) => div().size(18).flex_none().relative()
   .child(div().id(`session-icon-${id}`).absolute().left(0).top(0).size(15)
     .child((pane?.program?.icon ? (pane.program.tint ? svg(pane.program.icon).text_color(theme().muted) : image(pane.program.icon)) : svg("icons/shell.svg").text_color(theme().muted)).size(15)))
   .when(["working", "done"].includes(status), el => el.child(statusDot(status, id)));
-const workingSweep = (id, phase, width, color) => div().absolute().left(0).right(0).top(0).bottom(0).rounded(6).overflow_hidden()
-  .child(div().id(id).absolute().left(width * (phase === 0 ? -0.605 : phase === 1 ? 0.3 : 1.05)).top(0).w(width * 0.55).h_full().opacity(phase === 2 ? 0 : 1)
-    .transition("left", { duration: phase === 0 ? 0 : phase === 1 ? 1600 : 650, easing: "linear" })
-    .transition("opacity", { duration: phase === 2 ? 650 : 0, easing: "ease-out" })
+// The sweep runs as one native loop: no redraw timer keeps it moving.
+const workingSweep = (id, _phase, width, color) => div().absolute().left(0).right(0).top(0).bottom(0).rounded(6).overflow_hidden()
+  .child(div().id(id).absolute().left(0).top(0).w(width * 0.55).h_full()
+    .loop("left", { from: -width * 0.605, to: width * 1.05, period: 2300 })
     .child(svg("mods/agent-columns-spaces/working-sweep.svg").size_full().text_color(color)));
 // Small clickable glyph; stops the click so the row behind it doesn't also fire.
 const btn = (id, icon, fn) => div().id(id).flex_none().size(22).flex().items_center().justify_center().rounded(6)
@@ -94,18 +94,13 @@ export default class SpacesTabs extends View {
     this.workingSince = {};
     this.sweepPhase = 0;
     this.publishOffices();
-    cx.timer.every(1000, cx => { this.syncDragFocus(cx); this.refreshProjects(cx); this.publishOffices(); if (this.hasWorking) cx.notify(); });
-    cx.timer.every(60000, cx => { if (!this.hasWorking) cx.notify(); });
-    cx.timer.every(2300, cx => {
-      if (!this.hasWorking) return;
-      this.sweepPhase = 0;
-      cx.notify();
-      cx.timer.after(50, cx => {
-        this.sweepPhase = 1;
-        cx.notify();
-        cx.timer.after(1600, cx => { this.sweepPhase = 2; cx.notify(); });
-      });
+    cx.timer.every(1000, cx => {
+      this.syncDragFocus(cx);
+      this.refreshProjects(cx);
+      this.publishOffices();
+      if (this.hasWorking && globalThis.window.is_window_active()) cx.notify();
     });
+    cx.timer.every(60000, cx => { if (!this.hasWorking) cx.notify(); });
   }
   syncDragFocus(cx) {
     const ids = new Set(spaces().map(space => space.id));
@@ -117,6 +112,14 @@ export default class SpacesTabs extends View {
   publishOffices() {
     if (shared("workspace.project-owner") !== this.projectOwner) return;
     const all = panes();
+    const rawList = terminals();
+    const sig = JSON.stringify([
+      all.map(p => [p.pane, p.tab, p.title, p.focused, p.status, p.branch, p.workspaceFolder]),
+      spaces().map(s => [s.id, s.name, s.active, s.tabs.map(t => [t.id, t.name, t.named, t.status, t.active])]),
+      rawList.map(t => [t.address, t.parent, t.status, t.status_ms]),
+    ]);
+    if (sig === this.publishSig) return;
+    this.publishSig = sig;
     const activeSpace = spaces().find(space => space.active);
     const activePane = all.find(pane => pane.focused);
     const activeWindow = `${activeSpace?.id ?? ""}:${activeSpace?.tabs.find(tab => tab.active)?.id ?? ""}:${activePane?.pane ?? ""}`;
@@ -131,9 +134,13 @@ export default class SpacesTabs extends View {
       const status = [tab.status, ...mine.map(p => stateOf(p, raw.get(p.terminal)))].sort((a, b) => (rank[b] ?? 0) - (rank[a] ?? 0))[0];
       return [tab.id, { name: tabTitle(tab, all), status: status ?? null }];
     })));
-    const labelText = JSON.stringify(labels);
-    if (labelText !== this.tabLabelSnapshot) {
-      this.tabLabelSnapshot = labelText;
+    // A name that changes with a running timer would re-render every mod each tick; statuses publish at once.
+    const statusOf = JSON.stringify(Object.fromEntries(Object.entries(labels).map(([id, label]) => [id, label.status])));
+    const nameOf = JSON.stringify(Object.fromEntries(Object.entries(labels).map(([id, label]) => [id, label.name])));
+    if (statusOf !== this.labelStatus || (nameOf !== this.labelNames && Date.now() - (this.labelAt ?? 0) >= 2000)) {
+      this.labelStatus = statusOf;
+      this.labelNames = nameOf;
+      this.labelAt = Date.now();
       setShared("workspace.tab-labels", labels);
     }
     const groups = groupPaths(spaces(), all, this.bindings, raw);
@@ -285,16 +292,17 @@ export default class SpacesTabs extends View {
       .on_size_change((size, cx) => { if (this.width !== size.width) { this.width = size.width; cx.notify(); } })
       .on_hover((hovered, cx) => { if (!hovered && this.pressedSpace) { this.pressedSpace = null; this.overSpace = null; this.draggingSpace = false; cx.notify(); } })
       .on_mouse_up("left", (_event, cx) => { if (this.pressedSpace) { this.pressedSpace = null; this.overSpace = null; this.draggingSpace = false; cx.notify(); } })
-      .child(h_flex().id("spaces-header").h(30).flex_none().px(8).items_center().text_size(11.5).text_color(t.dim).cursor_pointer()
+      .child(h_flex().id("spaces-header").h(30).flex_none().px(8).gap(6).items_center().text_size(11.5).text_color(t.dim).cursor_pointer()
         .tooltip(blockCollapsed("spaces") ? "展开 Spaces" : "折叠 Spaces").hover(s => s.bg(t.hover))
         .on_click((_event, cx) => { cx.stop_propagation(); toggleBlock("spaces"); })
         .child(div().id("spaces-title").flex_1().h_full().flex().items_center().child("Spaces")
           .on_click((_event, cx) => { cx.stop_propagation(); toggleBlock("spaces"); }))
+        .child(btn("fold-spaces", blockCollapsed("spaces") ? "chevron-right" : "chevron-down", () => toggleBlock("spaces"))
+          .tooltip(blockCollapsed("spaces") ? "展开 Spaces" : "折叠 Spaces"))
         .child(btn("new-space", "plus", () => openOverlay({ mod: "space-folders", kind: "dialog", width: 560, height: 500, props: { machine: spaces().find(space => space.active)?.machine } }))))
       .children((blockCollapsed("spaces") ? [] : groupPaths(spaces(), all, bindings, raw)).map((group, i) =>
-        v_flex().id(`space-card-${group.id}`).relative().w_full().mb(12).rounded(7)
-          .bg(group.id === hoveredOffice ? t.hover : group.id === activeOffice || group.active ? t.selected : t.raised)
-          .border(1).border_color(group.id === activeOffice || group.active ? t.accent : t.border)
+        v_flex().id(`space-card-${group.id}`).relative().w_full().mb(4).rounded(6)
+          .bg(group.id === hoveredOffice ? t.hover : group.id === activeOffice || group.active ? t.selected : t.chrome)
           .when(this.draggingSpace && this.pressedSpace === group.id, el => el.opacity(0.5))
           .when(this.draggingSpace && this.overSpace === group.id && this.pressedSpace !== group.id, el => el.child(div().absolute().left(4).right(4).when(this.dropAfter, line => line.bottom(0)).when(!this.dropAfter, line => line.top(0)).h(2).bg(t.accent)))
           .on_mouse_move((event, cx) => {
@@ -323,7 +331,6 @@ export default class SpacesTabs extends View {
             }
             cx.notify();
           })
-          .child(div().absolute().left(0).top(7).bottom(7).w(group.id === activeOffice || group.active ? 3 : 2).rounded(2).bg(spaceColor(group.space, i)))
           .children([
         h_flex().id(`folder-${group.id}`).relative().items_center().gap(7).px(8).py(5).rounded(6)
           .bg(t.chrome + "00")
@@ -342,17 +349,17 @@ export default class SpacesTabs extends View {
             .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
             .on_click((_event, cx) => { cx.stop_propagation(); activateSpace(group); })
             .child(avatar({ ...group.space, name: group.name }, i)))
-          .child(div().id(`folder-title-${group.id}`).flex_1().min_w(0).truncate().text_size(13).text_color(t.foreground)
+          .child(div().id(`folder-title-${group.id}`).flex_1().min_w(0).truncate().text_size(13).text_color(group.active || group.id === activeOffice ? t.foreground : t.muted)
             .tooltip(sessionTabs(group.space, all).length ? (folded[group.id] ? "展开 Space" : "折叠 Space") : "打开 Space 首页")
             .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
             .on_click((_event, cx) => { cx.stop_propagation(); activateSpace(group); })
             .child(group.machine ? `${group.name} · ${group.machine}` : group.name))
-          .when(Boolean(group.binding.folders), el => el.child(div().id(`manage-folders-${group.id}`).text_size(10).text_color(t.dim).cursor_pointer().tooltip("管理 Space 文件夹")
+          .child(div().id(`manage-folders-${group.id}`).text_size(10).text_color(t.dim).cursor_pointer().tooltip("管理 Space 文件夹")
             .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
             .on_click((_event, cx) => { cx.stop_propagation(); openOverlay({ mod: "space-folders", kind: "dialog", width: 560, height: 500, props: { edit: true, space: group.space.id } }); })
-            .child(`${group.binding.folders.length} 目录`)))
-          .child(div().id(`drag-space-${group.id}`).size(14).flex_none().flex().items_center().justify_center().text_size(16).text_color(t.muted)
-            .opacity(this.hoveredSpace === group.id || this.focusedDrag === group.id || this.pressedSpace === group.id ? 1 : 0)
+            .child(`${group.binding.folders?.length ?? 1}目录`))
+          .child(div().id(`drag-space-${group.id}`).size(14).flex_none().flex().items_center().justify_center().text_size(16).text_color(t.dim)
+            .hover(s => s.text_color(t.muted))
             .cursor_grab().tooltip("拖动排序；键盘上下键调整顺序").role("button").accessibility_label(`调整 ${group.name} 顺序`)
             .when(Boolean(this.dragFocus[group.id]), el => el.track_focus(this.dragFocus[group.id]).tab_index(0))
             .on_key_down((event, cx) => {
@@ -391,8 +398,8 @@ export default class SpacesTabs extends View {
               .tooltip(unreadDone ? `${name} · 已完成，待查看` : name)
               .on_click(() => { run("space.select", { id: sp.id }); run("tab.select", { id: tb.id }); if (parentPane) run("pane.focus", { pane: parentPane.pane }); })
               .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); menu("tab", { id: tb.id, space: sp.id }); })
-              .child(div().absolute().left(16).top(0).bottom(entryIndex === group.entries.length - 1 ? 16 : 0).w(1).bg(t.dim))
-              .child(div().absolute().left(16).top(15).w(15).h(1).bg(t.dim))
+              .when(entryIndex < group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).bottom(0).w(1).bg(t.dim)).child(div().absolute().left(16).top(15).w(15).h(1).bg(t.dim)))
+              .when(entryIndex === group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).w(15).h(16).border_l(1).border_b(1).border_color(t.dim).rounded_bl(5)))
               .when(Boolean(rowPane), el => el.child(sessionIcon(rowPane, expanded ? states.get(rowPane.pane) : status, `tab-${tb.id}`)))
               .when(!rowPane, el => el.child(div().size(18).flex_none().relative()
                 .child(svg("mods/workspace-chrome/layers.svg").size(15).text_color(t.muted))
@@ -435,8 +442,8 @@ export default class SpacesTabs extends View {
                 .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); menu("pane", { pane: p.pane, terminal: p.terminal }); })
                 .when(entryIndex < group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).bottom(0).w(1).bg(t.dim)))
                 .child(div().w(12).h_full().flex_none().relative()
-                  .child(div().absolute().left(5).top(0).bottom(index === childPanes.length - 1 ? 14 : 0).w(1).bg(t.dim))
-                  .child(div().absolute().left(5).top(14).w(7).h(1).bg(t.dim)))
+                  .when(index < childPanes.length - 1, el => el.child(div().absolute().left(5).top(0).bottom(0).w(1).bg(t.dim)).child(div().absolute().left(5).top(14).w(7).h(1).bg(t.dim)))
+                  .when(index === childPanes.length - 1, el => el.child(div().absolute().left(5).top(0).w(7).h(15).border_l(1).border_b(1).border_color(t.dim).rounded_bl(5))))
                 .child(sessionIcon(p, states.get(p.pane), p.pane)
                   .tooltip(raw.get(p.terminal)?.parent ? `子 Agent · 父级：${raw.get(raw.get(p.terminal).parent)?.title || raw.get(p.terminal).parent} (${raw.get(p.terminal).parent})` : paneTitle(p)))
                 .child(div().flex_1().min_w(0).truncate().text_size(11.5)

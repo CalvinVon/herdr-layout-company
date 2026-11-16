@@ -111,7 +111,7 @@ export default class Board extends View {
     this.search = InputState.new({ placeholder: "Search agents…" });
     this.search.on("change", (_e, cx) => { setShared("agent-columns.filter", this.search.value()); cx.notify(); });
     cx.timer.every(1000, (cx) => {
-      if (!props()?.role) {
+      if (!props()?.role && globalThis.window.is_window_active()) {
         const allTerminals = terminals(), allSpaces = spaces();
         const raw = new Map(allTerminals.map(t => [t.address, t]));
         const tabs = new Map(allSpaces.flatMap(s => s.tabs.map(t => [t.id, t])));
@@ -166,9 +166,8 @@ export default class Board extends View {
     const elapsed = status === "working"
       ? `${approximate ? "~" : ""}${duration(Date.now() - since)}` : unreadDone ? "已完成 · 待查看" : state.label;
     return h_flex().id(`agent-${a.address}`).w_full().h(60).flex_none().rounded(7).overflow_hidden()
-      .bg(active ? theme().selected : unreadDone ? theme().done + "18" : C.white).border(1).border_color(active ? theme().accent : unreadDone ? theme().done : C.line).cursor_pointer().hover(s => s.border_color(active ? theme().accent : state.color))
+      .bg(active ? theme().selected : unreadDone ? theme().done + "18" : theme().chrome).cursor_pointer().hover(s => s.bg(theme().hover))
       .on_click(() => run("agent.focus", { terminal: a.address }))
-      .child(div().w(3).h_full().bg(state.color).flex_none())
       .child(v_flex().flex_1().min_w(0).px(10).py(7).gap(4)
         .child(h_flex().items_center().gap(6)
           .child(icon(a.program, 14).tooltip(`${a.program?.name ?? "Agent"} · ${a.address}${me?.parent ? ` · sub-agent of ${parent?.tab_name ?? me.parent}` : ""}`))
@@ -248,24 +247,28 @@ export default class Board extends View {
     const archivedCount = list.filter(a => archived(a, tabs)).length;
     // The archive toggle lives in the header of the board's last column.
     const toggle = () => h_flex().id("toggle-archived").h(22).px(7).gap(5).items_center().rounded(5).cursor_pointer()
-      .bg(showArchived() ? theme().selected : C.bg).text_size(10).text_color(showArchived() ? C.violet : C.muted)
+      .bg(showArchived() ? theme().selected : theme().chrome).text_size(10).text_color(showArchived() ? C.violet : C.muted)
       .hover((s) => s.bg(theme().hover)).child(svg("mods/workspace-chrome/archive.svg").size(12))
       .child(showArchived() ? "Hide archived" : `Archived (${archivedCount})`)
       .on_click((_e, cx) => { cx.stop_propagation(); setShared("agent-columns.archived", !showArchived()); });
     return v_flex().size_full().min_w(0).bg(theme().chrome).px(10).pb(10).gap(8)
-      .child(h_flex().id("agents-header").h(30).flex_none().items_center().gap(6).cursor_pointer()
+      .child(h_flex().id("agents-header").h(30).flex_none().items_center().gap(6).px(6).rounded(6).cursor_pointer()
         .tooltip(blockCollapsed("agents") ? "展开 Agents" : "折叠 Agents").hover(s => s.bg(theme().hover))
         .on_click((_event, cx) => { cx.stop_propagation(); toggleBlock("agents"); })
         .child(div().id("agents-title").flex_1().h_full().flex().items_center().text_size(12).font_semibold().text_color(C.ink).child("Agents")
           .on_click((_event, cx) => { cx.stop_propagation(); toggleBlock("agents"); }))
-        .when(!blockCollapsed("agents"), el => el.child(toggle())))
+        .when(!blockCollapsed("agents"), el => el.child(toggle()))
+        .child(div().id("fold-agents").size(24).flex_none().flex().items_center().justify_center().rounded(6).text_color(C.muted).cursor_pointer()
+          .tooltip(blockCollapsed("agents") ? "展开 Agents" : "折叠 Agents").hover(s => s.bg(theme().hover).text_color(C.ink))
+          .on_click((_event, cx) => { cx.stop_propagation(); toggleBlock("agents"); })
+          .child(svg(`mods/workspace-chrome/chevron-${blockCollapsed("agents") ? "right" : "down"}.svg`).size(12))))
       .when(!blockCollapsed("agents"), el => el.child(h_flex().h(29).flex_none().px(8).gap(6).items_center().rounded(6).bg(C.white).border(1).border_color(C.line)
         .child(svg("mods/workspace-chrome/search.svg").size(12).text_color(C.muted).flex_none())
         .child(Input.new(this.search).flex_1().min_w(0).h_full().text_size(11.5).text_color(C.ink))
         .when(Boolean(shared("agent-columns.filter")), el => el.child(control("clear-search", "×", "清除搜索", () => {
           this.search.set_value(""); setShared("agent-columns.filter", "");
         })))))
-      .when(!blockCollapsed("agents"), el => el.child(v_flex().flex_1().min_h(0).overflow_y_scrollbar().gap(12).children(shown.map(state => {
+      .when(!blockCollapsed("agents"), el => el.child(v_flex().flex_1().min_h(0).overflow_y_scrollbar().gap(6).children(shown.map(state => {
         const cards = columns.get(state.key);
         const folded = /** @type {Record<string, boolean>} */ (shared("agent-columns.sections-folded") ?? {});
         const toggleSection = () => {
@@ -280,7 +283,7 @@ export default class Board extends View {
             .child(dot(state.color, 7))
             .child(div().id(`section-title-${state.key}`).flex_1().h_full().flex().items_center().text_size(12).font_semibold().text_color(C.ink).child(state.label)
               .on_click((_event, cx) => { cx.stop_propagation(); toggleSection(); }))
-            .child(div().px(6).py(2).rounded(4).bg(state.wash).text_size(10).text_color(state.color).child(String(cards.length))))
+            .child(div().px(6).py(2).rounded(4).bg(C.white).text_size(10).text_color(C.muted).child(String(cards.length))))
           .when(!folded[state.key], el => el.child(v_flex().w_full().min_w(0).gap(6).children(cards.map(a => this.card(a, state, allAgents, raw, tabs, groups)))));
       }))));
 

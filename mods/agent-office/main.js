@@ -6,12 +6,14 @@
 // Three finishes in five minutes and pizza arrives. A cat lives here. Lights go down after
 // dark, the windows show the real weather, and the office decorates for the season.
 // Hover anyone to see what they're working on; click them to go to their terminal.
-import { View, div, svg } from "gpui-kit";
-import { agents, terminals, spaces, panes, shared, setShared, focused, run } from "herdr";
+import { View, div, svg, PathBuilder } from "gpui-kit";
+import { Scrollbar } from "gpui-base";
+import { agents, terminals, spaces, panes, shared, setShared, focused, run, exec, appHome, readTextFile, writeTextFile, openOverlay, machines, window, settings } from "herdr";
 import * as A from "./art.js";
 import * as D from "./decor.js";
 import * as T from "./themes.js";
 import { ProjectSelection, projectRooms, roomState, ROOM_STATE_KEYS } from "./projects.js";
+import * as S from "./wall-services.js";
 
 // Location is rounded before requesting the current conditions from Open-Meteo.
 const WEATHER = true;
@@ -81,16 +83,55 @@ function saveNumber(key, n) {
   try { localStorage.setItem(key, String(n)); } catch {}
 }
 
+function wallQR(matrix, unit, id) {
+  const path = PathBuilder.fill();
+  for (let y = 0; y < matrix.length; y++) {
+    for (let x = 0; x < matrix.length;) {
+      if (!matrix[y][x]) { x++; continue; }
+      const start = x;
+      while (x < matrix.length && matrix[y][x]) x++;
+      path.add_polygon([[(start + 4) * unit, (y + 4) * unit], [(x + 4) * unit, (y + 4) * unit], [(x + 4) * unit, (y + 5) * unit], [(start + 4) * unit, (y + 5) * unit]], true);
+    }
+  }
+  const size = (matrix.length + 8) * unit;
+  return div().id(id).size(size).relative().flex_none().bg("#ffffff")
+    .child(globalThis.window.paint_path(path.build(), "#000000").absolute().left(0).top(0).w(size).h(size));
+}
+
 export default class Office extends View {
   init(_props, cx) {
     this.size = { width: 1400, height: 250 };
     this.plateWidths = {};
     Object.assign(this, roomState());
     this.projectSelection = new ProjectSelection();
+    this.projectSelection.lastRequest = shared("agent-office.requested-project")?.token ?? 0;
     this.roomStates = new Map();
     this.currentProject = null;
     this.weather = null;
     this.overviewSnapshot = [];
+    this.wallCards = {};
+    this.wallPins = {};
+    this.wallExtras = {};
+    this.wallPublications = {};
+    this.wallGoal = null;
+    this.wallDismissed = {};
+    this.wallLastRequest = shared("office-wall.remove-request")?.token;
+    this.wallFileText = null;
+    this.wallClosed = false;
+    this.createWallFile(cx);
+    cx.timer.every(500, cx => {
+      const focus = focused();
+      if (!focus?.terminal && !focus?.agent && !focus?.pane && !focus?.tab) return;
+      const key = JSON.stringify([focus?.shown, focus?.terminal, focus?.agent, focus?.pane, focus?.tab, focus?.space]);
+      if (key === this.wallFocusKey) return;
+      this.wallFocusKey = key;
+      this.wallGoal = null;
+      this.wallExtras = Object.fromEntries(Object.entries(this.wallPublications).map(([room, cards]) => [room, [...cards]]));
+      cx.notify();
+      if (this.wallBusy) this.wallRefreshPending = true;
+      else this.refreshWall(cx);
+    });
+    cx.timer.every(2000, cx => this.refreshWall(cx));
     cx.timer.every(1000, () => this.publishOverview());
     this.now = new Date();
     this.incident = loadNumber("office.incident") ?? Date.now();
@@ -102,6 +143,162 @@ export default class Office extends View {
       cx.timer.every(30 * 60 * 1000, (cx) => this.refreshWeather(cx));
     }
   }
+
+  createWallFile(cx) {
+    cx.spawn(async cx => {
+      try {
+        const result = await exec("mktemp", ["-d", "-t", "herdr-office-wall"]);
+        if (result.code !== 0 || !result.stdout.trim()) throw new Error("无法创建临时目录");
+        const dir = result.stdout.trim();
+        if (this.wallClosed) { await exec("rm", ["-rf", dir]); return; }
+        this.wallDir = dir;
+        this.wallFile = `${dir}/services.json`;
+        await writeTextFile(this.wallFile, "{}", null);
+        this.wallFileText = "{}";
+        this.refreshWall(cx);
+      } catch (error) { this.wallError = String(error); cx.notify(); }
+    });
+  }
+
+  async close() {
+    this.wallClosed = true;
+    if (this.wallDir) await exec("rm", ["-rf", this.wallDir]);
+  }
+
+  refreshWall(cx) {
+    if (this.wallBusy || !this.wallFile || this.wallClosed) return;
+    this.wallBusy = true;
+    cx.spawn(async cx => {
+      try {
+        const groups = shared("workspace.office-groups");
+        const rooms = Array.isArray(groups) ? groups.filter(group => !group.machine && group.projectKey) : [];
+        try {
+          const text = await readTextFile(`${appHome()}/office-wall-pins.json`);
+          this.wallPins = S.parseWallPins(text);
+          this.wallPinError = null;
+        } catch (error) { this.wallPinError = String(error); }
+        const all = terminals();
+        const agentList = agents();
+        const agentAddresses = new Set(agentList.map(agent => agent.address));
+        const byAddress = new Map(all.map(terminal => [terminal.address, terminal]));
+        const request = shared("office-wall.remove-request");
+        if (request?.token && request.token !== this.wallLastRequest) {
+          this.wallLastRequest = request.token;
+          const existing = this.wallCards[request.roomKey]?.[request.id];
+          const publication = (this.wallPublications[request.roomKey] ?? []).find(card => card.id === request.id);
+          this.wallRemoveError = null;
+          if (publication) {
+            try {
+              const removed = await exec("node", [`${appHome()}/mods/agent-office/agent-publish.cjs`, "remove", "--room", request.roomKey, "--id", request.id]);
+              if (removed.code !== 0) throw new Error("移除 Agent 发布失败");
+            } catch { this.wallRemoveError = { roomKey: request.roomKey, id: request.id }; }
+          } else if (this.wallGoal?.roomKey === request.roomKey && this.wallGoal.card.id === request.id) {
+            this.wallDismissed[`${request.roomKey}:${request.id}`] = this.wallGoal.card.text;
+            this.wallGoal = null;
+          } else if (existing) {
+            this.wallDismissed[`${request.roomKey}:${request.id}`] = existing.signature;
+            delete this.wallCards[request.roomKey][request.id];
+          }
+        }
+        try {
+          const published = await exec("node", [`${appHome()}/mods/agent-office/agent-publish.cjs`, "list"]);
+          if (published.code !== 0) throw new Error("读取 Agent 发布失败");
+          const data = JSON.parse(published.stdout);
+          if (!data?.rooms || typeof data.rooms !== "object" || Array.isArray(data.rooms)) throw new Error("Agent 发布数据无效");
+          this.wallPublications = data.rooms;
+          this.wallPublicationError = null;
+        } catch (error) { this.wallPublicationError = String(error); }
+        const candidates = [];
+        for (const room of rooms) for (const member of room.members ?? []) {
+          const address = member.terminal;
+          const terminal = byAddress.get(address);
+          if (!address || address.includes("/") || agentAddresses.has(address) || !terminal) continue;
+          const foreground = S.serviceForeground(terminal);
+          const previous = this.wallCards[room.projectKey]?.[address];
+          if (!foreground) {
+            if (previous) this.wallCards[room.projectKey][address] = { ...previous, status: "unknown" };
+            continue;
+          }
+          if (this.wallDismissed[`${room.projectKey}:${address}`] === foreground.signature) continue;
+          candidates.push({ room: room.projectKey, member, terminal, foreground });
+        }
+        const ready = machines().find(machine => machine.name == null)?.layout === "ready";
+        for (const cards of Object.values(this.wallCards)) for (const [address, card] of Object.entries(cards)) {
+          if (!byAddress.has(address)) cards[address] = S.reconcileService(card, ready ? { stopped: true } : { complete: false });
+        }
+        const offset = (this.wallOffset ?? 0) % Math.max(candidates.length, 1);
+        const batch = candidates.slice(offset).concat(candidates.slice(0, offset)).slice(0, 4);
+        this.wallOffset = offset + batch.length;
+        const results = await Promise.all(batch.map(async item => {
+          try {
+            const history = this.wallCards[item.room]?.[item.member.terminal] ? "200" : "5000";
+            const observed = await exec("node", [`${appHome()}/mods/agent-office/wall-observer.cjs`, item.member.terminal, history]);
+            if (observed.code !== 0) throw new Error("终端观察失败");
+            const data = JSON.parse(observed.stdout);
+            return { ...item, data, parsed: data.parsed, qr: data.qr };
+          } catch (error) { return { ...item, error: String(error) }; }
+        }));
+        if (this.wallClosed) return;
+        const latest = shared("workspace.office-groups");
+        for (const item of results) {
+          if (!Array.isArray(latest) || !latest.some(room => !room.machine && room.projectKey === item.room && room.members?.some(member => member.terminal === item.member.terminal))) continue;
+          const address = item.member.terminal;
+          const cards = this.wallCards[item.room] ??= {};
+          const previous = cards[address];
+          if (item.error) { if (previous) cards[address] = { ...previous, status: "unknown" }; continue; }
+          if (!item.parsed && !item.qr) { if (previous && !item.data.complete) cards[address] = { ...previous, status: "unknown" }; continue; }
+          const urls = item.parsed?.urls ?? [];
+          const observation = { id: address, pane: item.member.pane, name: item.foreground.name, signature: item.foreground.signature, urls, qr: item.qr, qrKind: item.data.qrKind, qrUrl: item.data.qrUrl, complete: item.data.complete === true, status: item.data.complete === true ? "running" : "unknown" };
+          if (previous && previous.signature !== observation.signature && JSON.stringify(previous.urls) === JSON.stringify(urls)) cards[address] = { ...previous, status: "unknown" };
+          else if (previous?.signature === observation.signature) {
+            const keepOriginal = previous.qr && (previous.qrKind ?? "terminal") === "terminal" && observation.qrKind !== "terminal";
+            cards[address] = S.reconcileService(previous, { ...observation, qr: keepOriginal ? previous.qr : observation.qr ?? previous.qr, qrKind: keepOriginal ? "terminal" : observation.qrKind ?? previous.qrKind, qrUrl: keepOriginal ? undefined : observation.qrUrl ?? previous.qrUrl, urls: urls.length ? urls : previous.urls });
+          }
+          else cards[address] = observation;
+        }
+        let focus = focused();
+        let goal = S.activeSessionGoal(Array.isArray(latest) ? latest : [], agents(), focus);
+        const owner = goal && agents().find(agent => `goal:${agent.address}` === goal.card.id);
+        const pid = owner && terminals().find(terminal => terminal.address === owner.address)?.foreground?.pid;
+
+        if (goal && pid && /^(?:omp|ohmypi)$/i.test(owner?.app ?? "")) {
+          try {
+            const request = await exec("node", [`${appHome()}/mods/agent-office/session-goal.cjs`, String(pid)]);
+            const state = request.code === 0 ? JSON.parse(request.stdout) : null;
+            focus = focused();
+            const current = S.activeSessionGoal(shared("workspace.office-groups") ?? [], agents(), focus);
+            const currentPid = terminals().find(terminal => terminal.address === owner.address)?.foreground?.pid;
+            if (current?.card.id !== goal.card.id || currentPid !== pid) goal = current;
+            else {
+              if (typeof state?.text === "string" && state.text.length >= 4) goal.card = { ...goal.card, text: state.text, source: "当前请求" };
+              if (state?.todo?.length) goal.card = { ...goal.card, tasks: state.todo };
+            }
+          } catch { /* A missing or ambiguous session keeps the verified title. */ }
+        }
+        if (goal || focus?.terminal || focus?.agent) this.wallGoal = goal;
+        if (this.wallGoal && this.wallDismissed[`${this.wallGoal.roomKey}:${this.wallGoal.card.id}`] === this.wallGoal.card.text) this.wallGoal = null;
+        this.wallExtras = Object.fromEntries(Object.entries(this.wallPublications).map(([room, cards]) => [room, [...cards]]));
+        if (this.wallGoal) (this.wallExtras[this.wallGoal.roomKey] ??= []).push(this.wallGoal.card);
+        const roomKeys = new Set([...Object.keys(this.wallCards), ...Object.keys(this.wallExtras)]);
+        const visible = Object.fromEntries([...roomKeys].map(room => [room, S.orderWallCards([...Object.values(this.wallCards[room] ?? {}).map(({ signature, complete, ...card }) => card), ...(this.wallExtras[room] ?? [])])]));
+        this.wallError = results.some(item => item.error) || this.wallPublicationError ? "部分内容读取失败" : null;
+        const state = JSON.stringify([visible, this.wallError]);
+        const changed = state !== this.wallState;
+        this.wallState = state;
+        visible._updatedAt = Date.now();
+        const text = JSON.stringify(visible);
+        if (text !== this.wallFileText) {
+          await writeTextFile(this.wallFile, text, this.wallFileText);
+          this.wallFileText = text;
+        }
+        if (changed) cx.notify();
+      } catch (error) { this.wallError = String(error); cx.notify(); }
+      finally {
+        this.wallBusy = false;
+        if (this.wallRefreshPending) { this.wallRefreshPending = false; this.refreshWall(cx); }
+      }
+    });
+  }
   publishOverview() {
     const encoded = JSON.stringify(this.overviewSnapshot);
     if (encoded !== this.publishedOverview) {
@@ -110,9 +307,20 @@ export default class Office extends View {
     }
   }
 
+  openWallFile(path, cx) {
+    if (typeof path !== "string" || !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(path)) return;
+    const platform = window()?.platform, command = platform === "windows" ? "rundll32" : platform === "macos" ? "open" : "xdg-open";
+    const args = platform === "windows" ? ["url.dll,FileProtocolHandler", path] : [path];
+    cx.spawn(async cx => {
+      try { const result = await exec(command, args); if (result.code !== 0) throw new Error(result.stderr || "打开失败"); }
+      catch (error) { this.wallError = `打开文件失败：${String(error)}`; cx.notify(); }
+    });
+  }
+
 
   useProject(project) {
     if (project.id !== this.currentProject?.id) {
+      this.sceneOffset = 0;
       if (this.currentProject) this.roomStates.set(this.currentProject.id, Object.fromEntries(ROOM_STATE_KEYS.map(key => [key, this[key]])));
       Object.assign(this, this.roomStates.get(project.id) ?? roomState());
     }
@@ -225,7 +433,8 @@ export default class Office extends View {
   }
 
   render(cx) {
-    const { width: W, height: H } = this.size;
+    const zoom = settings().zoom;
+    const W = this.size.width / zoom, H = this.size.height / zoom;
     const groups = shared("workspace.office-groups");
     const rooms = projectRooms(Array.isArray(groups) ? groups : [], agents(), T.themeFor, this.projectSelection.targets);
     const project = this.projectSelection.choose(rooms, focused(), shared("agent-office.requested-project")) ?? { id: "loading", name: "正在载入项目办公室…", agents: [], members: [], theme: T.themeFor({ id: "loading" }) };
@@ -242,7 +451,11 @@ export default class Office extends View {
     const deskCount = Math.max(MIN_DESKS, here.length);
     const g = (this.g = this.geometry(W, H, deskCount));
     A.setScale(g.P);
-    const canvasWidth = g.contentWidth;
+    const wallServices = [...Object.values(this.wallCards[project.projectKey] ?? {}), ...(this.wallExtras[project.projectKey] ?? [])];
+    const wallPinned = Array.isArray(this.wallPins[project.projectKey]) ? this.wallPins[project.projectKey] : [];
+    const wallCards = [...wallServices, ...wallPinned.filter(pin => !wallServices.some(card => card.id === pin?.id))];
+    const wallBoardWidth = Math.max(400, 198 + wallCards.reduce((sum, card) => sum + (card.kind === "goal" ? 208 : 184) + 6, 0));
+    const canvasWidth = Math.max(g.contentWidth, g.wallLeft + g.wallWidth + wallBoardWidth + 24);
     this.seat(here, g.door, cx);
     here.forEach((agent, index) => { this.desk[agent.address] = index; });
     this.track(list, now, cx);
@@ -282,16 +495,20 @@ export default class Office extends View {
     if (this.cat.goal === "sleep" && !this.away.includes(this.cat.desk)) this.wanderCat();
 
     const alarmed = here.filter((a) => a.status === "blocked" && now - (this.blockedSince[a.address] ?? now) > ALARM_AFTER);
-    const people = here.map((a) => {
+    // Only what the viewport can show is built; walk state still advances for everyone.
+    const spanLeft = (this.sceneOffset ?? 0) - 240, spanRight = (this.sceneOffset ?? 0) + W + 240;
+    const visible = (x, width = 80) => x + width >= spanLeft && x <= spanRight;
+    const people = here.flatMap((a) => {
       const p = place[a.address];
       const start = this.started ? g.door : null;
       const at = this.walk(a.address, p.spot, p.x, p.y, WALK_SPEED, cx, start);
-      return this.person(a, at, g, p.face, tabs[a.tab], alarmed.includes(a));
+      return visible(at.x) ? [this.person(a, at, g, p.face, tabs[a.tab], alarmed.includes(a))] : [];
     });
-    const desks = Array.from({ length: deskCount }, (_, i) => {
+    const desks = Array.from({ length: deskCount }, (_, i) => i).flatMap((i) => {
       const pos = g.deskPos(i);
+      if (!visible(pos.x)) return [];
       const a = byDesk[i];
-      return this.deskAt(i, pos, g, a, a && tabs[a.tab], a && branches[a.pane]);
+      return [this.deskAt(i, pos, g, a, a && tabs[a.tab], a && branches[a.pane])];
     });
 
     const hour = this.now.getHours();
@@ -301,8 +518,14 @@ export default class Office extends View {
     this.started = true;
 
     return div().id("office").size_full().flex().relative().overflow_hidden().bg(project.theme.wall)
-      .on_size_change((size, cx) => { this.size = size; cx.notify(); })
-      .child(div().flex_1().min_w(0).h_full().overflow_x_scrollbar().child(div().w(canvasWidth).h(H).relative().children([
+      .on_size_change((size, cx) => { if (this.size.width !== size.width || this.size.height !== size.height) { this.size = size; cx.notify(); } })
+      .child(div().id("office-scene").flex_1().min_w(0).h_full().relative().overflow_hidden()
+        .on_scroll_wheel((event, cx) => {
+          const delta = (Math.abs(event.delta.x) > Math.abs(event.delta.y) ? event.delta.x : event.delta.y) / zoom;
+          const width = event.bounds ? event.bounds.width / zoom : W;
+          this.sceneOffset = Math.max(0, Math.min(canvasWidth - width, (this.sceneOffset ?? 0) - delta));
+          cx.notify();
+        }).child(div().w(canvasWidth).h(H).relative().left(-Math.min(this.sceneOffset ?? 0, Math.max(0, canvasWidth - W))).children([
         ...this.room(canvasWidth, H, g, sky(hour), list, all, now, when),
         ...here.flatMap((a, i) => i > 0 && here[i - 1].tab !== a.tab ? [div().id(`tab-divider-${i}`).absolute().left(g.deskPos(i).x - 3 * P).top(g.floorY - 28 * P).w(2 * P).h(27 * P).bg(project.theme.trim)] : []),
         ...desks,
@@ -347,12 +570,61 @@ export default class Office extends View {
       [150, D.whiteboard(0, 0, [["#3d8be0", `WORKING  ${count("working")}`, true, "office-count-working"], ["#58a368", `DONE     ${count("done")}`, true, "office-count-done"], ["#e05252", `BLOCKED  ${count("blocked")}`, true, "office-count-blocked"], ["#8a8f99", `ON BREAK ${count("idle") - napping}`, true, "office-count-idle"], ["#6b5fb5", `NAPPING  ${napping}`, napping > 0, "office-count-napping"], ["#c0643f", `INTERNS  ${interns}`, interns > 0, "office-count-interns"], ["#d94a3a", "PIZZA!!", Boolean(this.party), "office-party"], ["#426c79", `WEATHER  ${this.weather ?? "unavailable"}`, true, "office-weather"]], h)],
       remotes.length ? [158, D.videoWall(0, 0, h, remotes)] : [120, D.windowPane(0, 0, 120, h, s, weather, false)],
     ];
+    const roomKey = this.currentProject?.projectKey;
+    const pinnedCards = Array.isArray(this.wallPins[roomKey]) ? this.wallPins[roomKey] : [];
+    const serviceCards = [...Object.values(this.wallCards[roomKey] ?? {}), ...(this.wallExtras[roomKey] ?? [])].map(card => ({ ...card, qr: card.qr ?? pinnedCards.find(pin => pin?.id === card.id)?.qr }));
+    const wallCards = S.orderWallCards([...serviceCards, ...pinnedCards.filter(pin => !serviceCards.some(card => card.id === pin?.id))]);
+    const boardWidth = Math.max(400, 198 + wallCards.reduce((sum, card) => sum + (card.kind === "goal" ? 208 : 184) + 6, 0));
+    const boardHeight = Math.min(h + 10, g.wallBottom - 40);
+    const tasks = wallCards.find(card => card.kind === "goal")?.tasks ?? [];
     return [
       ...T.roomBackdrop(W, H, g, this.currentProject, s, weather),
-      div().id("wall-fixtures").absolute().left(g.wallLeft).top(40).w(fixtures.reduce((sum, [w]) => sum + w, 0) + 12 * (fixtures.length - 1)).h(stripHeight).flex().gap(12).children(g.wallOrder.map((index, position) => {
+      div().id("wall-fixtures").absolute().left(g.wallLeft + boardWidth + 12).top(40).w(fixtures.reduce((sum, [w]) => sum + w, 0) + 12 * (fixtures.length - 1)).h(stripHeight).flex().gap(12).children(g.wallOrder.map((index, position) => {
         const [w, el] = fixtures[index];
         return div().relative().flex_none().w(w).h(h).mt(position % 2 * g.wallStagger).child(el);
       })),
+      div().id("office-service-wall").absolute().left(g.wallLeft).top(40).w(boardWidth).h(boardHeight).p(5).bg("#7a5c3e")
+        .child(div().size_full().p(5).bg("#fbf8f1").flex().gap(6).text_color("#3b3b44")
+          .child(div().w(176).flex_none().min_h(0).flex().flex_col().gap(3)
+            .child(div().font_bold().text_size(11).child(`信息墙 · ${wallCards.length}`))
+            .when(Boolean(this.wallError || this.wallPinError), el => el.child(div().text_size(9).text_color("#b04136").child("部分信息读取失败")))
+            .child(div().id("office-todo-board").flex_1().min_h(0).p(3).bg("#6d4c36")
+              .on_click((_event, cx) => cx.stop_propagation())
+              .on_scroll_wheel((_event, cx) => cx.stop_propagation())
+              .child(div().size_full().p(4).bg("#263f3b").relative()
+                .child(div().id("office-todo-scroll").size_full().pr(8).overflow_y_scroll().flex().flex_col().gap(3)
+                  .when(!tasks.length, el => el.child(div().text_size(8).text_color("#aabeb0").child("暂无 TODO")))
+                  .children(tasks.map((task, index) => div().id(`office-todo-${index}`).flex_none().flex().gap(4).p(3).bg("#35534b")
+                    .child(div().size(4).mt(2).flex_none().bg(task.status === "done" ? "#92b392" : task.status === "in_progress" ? "#efc36d" : "#c77d6a"))
+                    .child(div().flex_1().min_w(0).text_size(8).whitespace_normal().text_color(task.status === "done" ? "#a9b7a8" : "#f2ebd5")
+                      .child(`${task.status === "done" ? "✓" : task.status === "in_progress" ? "▶" : "○"} ${task.text}`)))))
+                .child(Scrollbar.vertical("office-todo-scroll").mode("always").absolute().inset_0()))))
+          .children(wallCards.map((card, index) => {
+            const matrix = Array.isArray(card?.qr) && card.qr.length >= 21 && card.qr.length <= 177 && card.qr.every(row => Array.isArray(row) && row.length === card.qr.length) ? card.qr : null;
+            const unit = matrix ? Math.floor((boardHeight - 20) / (matrix.length + 8)) : 0;
+            const links = (card.kind === "note" || card.kind === "goal") ? [card.text] : card.kind === "file" ? [card.path] : (Array.isArray(card.urls) ? (card.qrKind === "generated" && card.qrUrl ? [card.qrUrl, ...card.urls.filter(url => url !== card.qrUrl)] : card.urls) : card.url ? [card.url] : []).slice(0, 2);
+            const isGoal = card.kind === "goal";
+            return div().id(`office-wall-card-${index}`).w(isGoal ? 208 : 184).h_full().p(3).flex_none().flex().gap(4).bg("#f0ebe1")
+              .when(card.kind === "file", el => el.cursor_pointer().on_click((_event, cx) => { cx.stop_propagation(); this.openWallFile(card.path, cx); }))
+              .when(Boolean(matrix && unit > 0), el => el.child(wallQR(matrix, unit, index === 0 ? "office-wall-qr" : `office-wall-qr-${index}`)))
+              .child(div().flex_1().min_w(0).overflow_hidden().flex().flex_col().gap(2)
+                .child(div().w_full().flex().gap(4)
+                  .child(div().flex_1().min_w(0).text_size(9).font_semibold().truncate().child(card.name || "服务")))
+                .child(div().text_size(9).text_color("#6b6054").child(isGoal ? (card.source || "会话标题") : card.kind === "file" ? "产出文件" : card.kind === "note" ? "重要信息" : ({ running: "运行中", stopped: "已停止", unknown: "状态未知" })[card.status] ?? "固定"))
+                .when(isGoal, el => el.child(div().w_full().flex_1().min_h(0).relative()
+                  .on_scroll_wheel((_event, cx) => cx.stop_propagation())
+                  .child(div().id(`office-wall-goal-scroll-${index}`).size_full().overflow_y_scroll().flex().flex_col().gap(2).pr(10)
+                    .child(div().flex_none().text_size(9).text_color("#3b3b44").whitespace_normal().child(card.text)))
+                  .child(Scrollbar.vertical(`office-wall-goal-scroll-${index}`).mode("always").absolute().inset_0())))
+                .when(!isGoal, el => el.child(div().text_size(9).text_color("#426c79").truncate().child(links[0] ?? "")))
+                .when(Boolean(card.source && !isGoal), el => el.child(div().text_size(8).text_color("#6b6054").truncate().child(card.source)))
+                .when(Boolean(matrix), el => el.child(div().text_size(8).text_color("#6b6054").child(card.qrKind === "generated" ? "链接二维码" : "终端原码")))
+                .when(!isGoal, el => el.children(links.map(url => div().text_size(9).text_color("#426c79").truncate().child(url)))));
+          })))
+        .when(Boolean(roomKey && !this.currentProject?.machine), el => el.cursor_pointer().on_click(() => {
+          const services = [...Object.values(this.wallCards[roomKey] ?? {}).map(({ signature, complete, ...card }) => card), ...(this.wallExtras[roomKey] ?? [])];
+          openOverlay({ mod: "office-wall", kind: "dialog", width: 760, height: 650, props: { roomKey, roomName: this.currentProject.name, services, serviceFile: this.wallFile } });
+        })),
       D.clock(18, 10, clock(this.now)),
       D.door(g.doorX, g.wallBottom, g.P, now < this.doorUntil),
       ...((when === "winter" || when === "newyear") ? D.stringLights(W, 2) : []),
@@ -446,7 +718,7 @@ export default class Office extends View {
     const focused = a.focused;
     const title = (a.title ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim() || a.program?.name || "Terminal";
     const available = (A.SLOT - 8) * A.P - 36 - (remote(a.address) ? 13 : 0);
-    const width = this.plateWidths[a.address] ?? 0;
+    const width = (this.plateWidths[a.address] ?? 0) / settings().zoom;
     const overflow = Math.max(0, width - available);
     return div().w((A.SLOT - 8) * A.P).h(16).px(5).gap(4).rounded(4).flex().items_center()
       .bg(focused ? "#fff6dd" : "#00000040").text_size(10).text_color(focused ? "#3b2a1a" : "#fffaf0")

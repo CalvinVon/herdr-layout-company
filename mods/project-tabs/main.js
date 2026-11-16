@@ -1,6 +1,7 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, terminals, hc, appHome, readTextFile, writeTextFile, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
+import { spaces, panes, terminals, machines, focused, hc, appHome, readTextFile, writeTextFile, run, openOverlay, closeOverlay, theme, window, shared, setShared, nextCommand, notify, layout, settings } from "herdr";
+import { moveTerminal } from "./move-terminal.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -12,12 +13,49 @@ function find(node, id) {
 }
 
 export default class Tabs extends View {
-  init() {
+  init(_props, cx) {
+    cx.spawn(async cx => {
+      for (;;) {
+        const command = await nextCommand();
+        const space = spaces().find(item => item.active);
+        if (command === "new-space") {
+          openOverlay({ mod: "space-folders", kind: "dialog", width: 560, height: 500, props: { machine: space?.machine } });
+          continue;
+        }
+        if (command === "new-tab") {
+          openOverlay(space
+            ? { mod: "space-home", kind: "dialog", width: 860, height: 680, props: { space: space.id, launcher: true } }
+            : { mod: "space-folders", kind: "dialog", width: 560, height: 500 });
+          continue;
+        }
+        if (command === "split-right" || command === "split-down") {
+          const pane = panes().find(item => item.pane === focused()?.pane && item.terminal);
+          if (pane) openOverlay({ mod: "agent-columns-new-menu", kind: "popup", width: 320, height: 304, props: { pane: pane.pane, direction: command === "split-right" ? "right" : "down" } });
+          continue;
+        }
+        if (command !== "move-terminal") continue;
+        const request = shared("project-tabs.move-terminal");
+        if (!request || request.claimed) continue;
+        setShared("project-tabs.move-terminal", { ...request, claimed: true });
+        cx.spawn(async cx => {
+          try {
+            await moveTerminal({ spaces, panes, terminals, machines, focused, run, sleep: ms => cx.sleep(ms) }, request);
+          } catch (error) {
+            notify({ title: "无法移动 Agent", body: `${request.terminal}：${String(error.message || error)}`, level: "error" });
+          } finally {
+            if (shared("project-tabs.move-terminal")?.id === request.id) setShared("project-tabs.move-terminal", null);
+          }
+        });
+      }
+    });
     this.pressed = null;
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
     this.editors = {};
     this.editorPending = {};
     this.editorErrors = {};
+    this.panelMode = localStorage.getItem("panel-mode") === "floating" ? "floating" : "inline";
+    setShared("project-tabs.panel-mode", this.panelMode);
+    this.floatingPanel = null;
   }
 
   // The side panel is remembered per space: switching shows that space's choice
@@ -47,7 +85,6 @@ export default class Tabs extends View {
     this.panels[space.id] = now;
     localStorage.setItem("panels", JSON.stringify(this.panels));
   }
-
   syncEditor(space, panel, body, cx) {
     const layoutName = shared("layout");
     if (!["office", "agent-columns"].includes(layoutName) || !space || this.pending) return;
@@ -65,7 +102,8 @@ export default class Tabs extends View {
       const existing = records.find(t => t.state === "live" && t.labels?.["office.editor.space"] === space.id);
       if (existing) address = this.editors[space.id] = existing.address;
     }
-    const visible = !panel?.hidden && body?.active === "editor";
+    const floating = shared("project-tabs.floating-panel");
+    const visible = (!panel?.hidden && body?.active === "editor") || (this.panelMode === "floating" && floating?.space === space.id && floating?.panel === "editor");
     const content = address ? { terminal: address } : { mod: "office-editor", props: { message: this.editorErrors[space.id] || "Opening TTT…" } };
     if ((slot.content?.terminal !== content.terminal || slot.content?.mod !== content.mod || slot.content?.props?.message !== content.props?.message) && !this.editorLayoutPending && !this.editorLayoutError) {
       this.editorLayoutPending = true;
@@ -163,15 +201,50 @@ export default class Tabs extends View {
     const panel = find(root, "panel"), body = find(root, "panel-body");
     const visiblePanels = shared("workspace.panels") ?? ["files", "changes"];
     const enabled = ["office", "agent-columns"].includes(shared("layout")) ? [...visiblePanels, "editor"] : visiblePanels;
-    this.syncPanel(space, panel, body, enabled);
+    if (this.panelMode === "inline") this.syncPanel(space, panel, body, enabled);
+    else if (panel && !panel.hidden) run("layout.hide", { id: "panel" });
     this.syncEditor(space, panel, body, cx);
+    if (this.panelMode === "floating" && space && typeof shared("files-markdown.open") === "string") {
+      const current = shared("project-tabs.floating-panel");
+      if (current?.space !== space.id || current?.panel !== "files") setShared("project-tabs.floating-panel", { space: space.id, panel: "files" });
+    }
+    let floating = shared("project-tabs.floating-panel");
+    if (this.panelMode !== "floating" || floating?.space !== space?.id || !enabled.includes(floating?.panel)) floating = null;
+    const floatingContent = floating?.panel === "editor"
+      ? (this.editors[space.id] ? { terminal: this.editors[space.id] } : { mod: "office-editor", props: { message: this.editorErrors[space.id] || "Opening TTT…" } })
+      : null;
+    const floatingKey = floating ? JSON.stringify([floating, floatingContent]) : null;
+    if (this.floatingPanel?.key !== floatingKey) {
+      if (this.floatingPanel) closeOverlay(this.floatingPanel.id);
+      this.floatingPanel = null;
+      if (floating) {
+        let content = floating.panel === "changes"
+          ? find(root, floating.history ? "git-history" : "git-changes")
+          : floating.panel === "editor"
+            ? { id: "floating-editor", type: "block", content: floatingContent }
+            : find(root, "files");
+        if (floating.panel === "files" && content) content = { ...content, content: { ...content.content, props: { ...content.content.props, floating: true } } };
+        if (content) {
+          const header = { id: "floating-header", type: "block", size: { px: 34 }, content: { mod: "project-panel-window", props: { panel: floating.panel, history: Boolean(floating.history) } } };
+          const id = openOverlay({ kind: "window", width: 0.7, height: 0.8, layout: { id: "floating-panel", type: "column", children: [header, content] } });
+          this.floatingPanel = { id, key: floatingKey };
+        }
+      }
+    }
     const panelButton = (id, label, icon) => {
-      const on = panel && !panel.hidden && body?.active === id;
+      const on = this.panelMode === "floating" ? floating?.panel === id : panel && !panel.hidden && body?.active === id;
       return h_flex().id(`panel-${id}`).h(26).px(8).gap(5).flex_none().items_center().rounded(6)
         .text_size(12).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
         .hover(s => s.bg(t.hover)).tooltip(id === "editor" && this.editorLayoutError ? this.editorLayoutError : label).on_mouse_down("left", stop)
         .on_click(() => {
           if (id === "editor") this.editorLayoutError = null;
+          if (this.panelMode === "floating") {
+            if (!space) return;
+            if (id === "editor" && space) delete this.editorErrors[space.id];
+            setShared("project-tabs.floating-panel", on ? null : { space: space.id, panel: id });
+            cx.notify();
+            return;
+          }
           if (on) run("layout.hide", { id: "panel" });
           else { if (id === "editor" && space) delete this.editorErrors[space.id]; run("layout.select", { stack: "panel-body", child: id }); run("layout.show", { id: "panel" }); }
         }).child(svg(icon).size(14)).child(label);
@@ -183,6 +256,14 @@ export default class Tabs extends View {
       .child(button("tab-new", "+", () => openOverlay(space
         ? { mod: "space-home", kind: "dialog", width: 860, height: 680, props: { space: space.id, launcher: true } }
         : { mod: "space-folders", kind: "dialog", width: 560, height: 500 })))
+      .when(["office", "agent-columns"].includes(shared("layout")), el => el.child(button("panel-mode", this.panelMode === "floating" ? "悬浮" : "插入", () => {
+        this.panelMode = this.panelMode === "floating" ? "inline" : "floating";
+        localStorage.setItem("panel-mode", this.panelMode);
+        setShared("project-tabs.panel-mode", this.panelMode);
+        setShared("project-tabs.floating-panel", null);
+        if (this.panelMode === "floating") run("layout.hide", { id: "panel" });
+        cx.notify();
+      }).w(42).text_size(11).tooltip("切换面板显示方式")))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
       .when(["office", "agent-columns"].includes(shared("layout")), el => el.child(panelButton("editor", this.editorLayoutError ? "Editor !" : "Editor", "mods/files/file.svg")))

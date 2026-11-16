@@ -1,0 +1,9 @@
+# Move an Agent split
+
+In Office and Agent Columns, the tab bar accepts `project-tabs.new-space`, `project-tabs.new-tab`, `project-tabs.split-right`, and `project-tabs.split-down` key actions. Bind them in Herdr's `keys.json` to open the Space, session, and focused-terminal split menus.
+
+In the Office or Agent Columns layout, hover an Agent split header and click the arrow leaving a square. Choose a new tab, or choose an existing tab in the same Space and select a right or down split. The destination list scrolls and includes only other tabs with a live terminal pane. The same running terminal is moved; only split tabs offer the action, and one move at a time is accepted. A new tab uses the moved Agent's session title. Existing destination tab names are preserved.
+
+Herdr performs park and keep asynchronously, not as one atomic move. The tab bar checks the original pane, Space, machine and destination before parking. For an existing tab it then selects the tab, focuses a live terminal pane and checks that focus before keeping the Agent there. It waits for the actual destination to appear; for a new tab it also confirms the name. Keep the layout and Space selected until the move completes. If the destination disappears or the Space changes after parking, check the original Space and restore the running terminal from the Agent list if necessary. A timeout does not cancel a delayed Herdr operation: inspect the tabs and Agent list before restoring or retrying. If the layout changes while a move is in flight, the tab bar may be destroyed before it can finish or report the outcome; inspect and restore the terminal in the original Space.
+
+Development check: `node mods/project-tabs/move-terminal-check.cjs` from the backup root. Runtime behavior also needs checking in Herdr, including remote machines, both split directions, and switching Spaces or closing the destination during a move.

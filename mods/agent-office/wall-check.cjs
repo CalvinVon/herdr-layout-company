@@ -1,0 +1,37 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const file = path.join(__dirname, 'wall-services.js');
+const source = fs.readFileSync(file, 'utf8').replace(/^export /gm, '');
+const { extractService, extractTerminalQR, reconcileService, serviceForeground, parseWallPins, activeSessionGoal, orderWallCards } = new Function(source + '\nreturn {extractService, extractTerminalQR, reconcileService, serviceForeground, parseWallPins, activeSessionGoal, orderWallCards};')();
+assert.deepEqual(orderWallCards([{ kind: 'note' }, { kind: 'file' }, { kind: 'goal' }]).map(card => card.kind), ['goal', 'note', 'file']);
+const card = extractService('App running at:\n  - Local: http://localhost:8081/\n  - Network: http://192.0.2.1:8081/');
+assert.deepEqual(card?.urls, ['http://localhost:8081/', 'http://192.0.2.1:8081/']);
+const restarted = extractService('App running at:\n Local: http://localhost:8081/\n Network: http://192.0.2.1:8081/\nApp running at:\n Local: http://localhost:8082/\n Network: http://192.0.2.1:8082/');
+assert.deepEqual(restarted?.urls, ['http://localhost:8082/', 'http://192.0.2.1:8082/']);
+assert.equal(serviceForeground({ foreground: { name: 'node', argv: ['npm run serve:web'], pid: 42 } }).name, 'npm run serve:web');
+assert.throws(() => parseWallPins('{"version":1,"rooms":{"project":[null]}}'));
+assert.throws(() => parseWallPins('{"version":1,"rooms":{"project":[{"id":"n","name":"note","url":"","kind":"note"}]}}'));
+assert.equal(parseWallPins('{"version":1,"rooms":{"project":[{"id":"n","name":"note","url":"","kind":"note","text":"value"}]}}').project[0].text, 'value');
+const room = { projectKey: 'local:alpha', machine: null, members: [{ pane: 'p1', terminal: 't1', tab: 'tab1' }, { pane: 'p2', terminal: 't2', tab: 'tab1' }] };
+const agent = { address: 't1', pane: 'p1', tab: 'tab1', title: '实现服务信息墙' };
+assert.equal(activeSessionGoal([room], [agent], { terminal: 't1', pane: 'p1', tab: 'tab1' })?.card.text, '实现服务信息墙');
+assert.equal(activeSessionGoal([room], [{ ...agent, title: 'π ⠙ 实现服务信息墙' }], { terminal: 't1', pane: 'p1', tab: 'tab1' })?.card.text, '实现服务信息墙');
+assert.equal(activeSessionGoal([room], [agent], { terminal: 't2', pane: 'p2', tab: 'tab1' })?.roomKey, 'local:alpha');
+assert.equal(activeSessionGoal([room], [agent, { ...agent, address: 't3', pane: 'p3' }], { terminal: 't2', pane: 'p2', tab: 'tab1' }), null);
+const rows = [
+  '1111111011000010101111111','1000001000000110101000001','1011101010011101001011101','1011101011010110001011101','1011101011110011101011101','1000001001001010101000001','1111111010101010101111111','0000000001010001100000000','1111001010000001110011101','1111000001000100010100010','0111001010000100111110000','0010100110011110000001100','0010111011010111011010111','0100000101110001111110001','0111111111101100100010110','1000000111101011111110001','0010011000010101111111111','0000000011001110100010101','1111111001011100101010111','1000001001001011100010011','1011101001111100111111010','1011101011101101011011111','1011101011111100011010110','1000001011000001011010100','1111111011001010011111111'
+];
+const observed = rows.map(row => [...row].map(bit => `\x1b[${bit === '1' ? 40 : 47}m  \x1b[0m`).join('')).join('\n');
+assert.deepEqual(extractTerminalQR(observed), rows.map(row => [...row].map(bit => bit === '1')));
+const repainted = rows.map(row => [...row].map(bit => `\x1b[48;5;${bit === '1' ? 0 : 7}m  \x1b[0m`).join('')).join('\n');
+assert.deepEqual(extractTerminalQR(repainted), rows.map(row => [...row].map(bit => bit === '1')));
+const pairs = rows.concat('0'.repeat(rows[0].length));
+const small = ['▄'.repeat(rows[0].length + 2)];
+for (let y = 0; y < pairs.length; y += 2) small.push('█' + [...pairs[y]].map((top, x) => top === '1' ? (pairs[y + 1][x] === '1' ? ' ' : '▄') : (pairs[y + 1][x] === '1' ? '▀' : '█')).join('') + '█');
+assert.deepEqual(extractTerminalQR(small.join('\n')), rows.map(row => [...row].map(bit => bit === '1')));
+const service = { id: 't1', signature: 'node:1', urls: ['http://localhost:8081/'], status: 'running' };
+assert.equal(reconcileService(service, { signature: 'shell:1', urls: service.urls, complete: true })?.status, 'unknown');
+assert.equal(reconcileService(service, { stopped: true })?.status, 'stopped');
+assert.equal(reconcileService(service, { signature: 'node:1', urls: service.urls, complete: false })?.status, 'unknown');
+console.log('Service discovery checks passed.');
