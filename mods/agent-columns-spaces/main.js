@@ -29,10 +29,10 @@ const sessionIcon = (pane, status, id) => div().size(18).flex_none().relative()
   .child(div().id(`session-icon-${id}`).absolute().left(0).top(0).size(15)
     .child((pane?.program?.icon ? (pane.program.tint ? svg(pane.program.icon).text_color(theme().muted) : image(pane.program.icon)) : svg("icons/shell.svg").text_color(theme().muted)).size(15)))
   .when(["working", "done"].includes(status), el => el.child(statusDot(status, id)));
-const workingSweep = (id, phase, width, color) => div().absolute().left(0).right(0).top(0).bottom(0).rounded(6).overflow_hidden()
-  .child(div().id(id).absolute().left(width * (phase === 0 ? -0.605 : phase === 1 ? 0.3 : 1.05)).top(0).w(width * 0.55).h_full().opacity(phase === 2 ? 0 : 1)
-    .transition("left", { duration: phase === 0 ? 0 : phase === 1 ? 1600 : 650, easing: "linear" })
-    .transition("opacity", { duration: phase === 2 ? 650 : 0, easing: "ease-out" })
+// Ping-pong by design: `loop` travels from→to and back in one period, so 3200ms keeps the old 1.6s per leg.
+const workingSweep = (id, _phase, width, color) => div().absolute().left(0).right(0).top(0).bottom(0).rounded(6).overflow_hidden()
+  .child(div().id(id).absolute().left(0).top(0).w(width * 0.55).h_full()
+    .loop("left", { from: -width * 0.605, to: width * 1.05, period: 3200, easing: "linear" })
     .child(svg("mods/agent-columns-spaces/working-sweep.svg").size_full().text_color(color)));
 // Small clickable glyph; stops the click so the row behind it doesn't also fire.
 const btn = (id, icon, fn) => div().id(id).flex_none().size(22).flex().items_center().justify_center().rounded(6)
@@ -101,16 +101,6 @@ export default class SpacesTabs extends View {
       if (this.hasWorking && globalThis.window.is_window_active()) cx.notify();
     });
     cx.timer.every(60000, cx => { if (!this.hasWorking) cx.notify(); });
-    cx.timer.every(2300, cx => {
-      if (!this.hasWorking) return;
-      this.sweepPhase = 0;
-      cx.notify();
-      cx.timer.after(50, cx => {
-        this.sweepPhase = 1;
-        cx.notify();
-        cx.timer.after(1600, cx => { this.sweepPhase = 2; cx.notify(); });
-      });
-    });
   }
   syncDragFocus(cx) {
     const ids = new Set(spaces().map(space => space.id));
