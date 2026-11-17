@@ -49,10 +49,11 @@ for (const sp of spaces) rules.rememberWorktrees(sp, bindings[sp.id], panes, raw
 const original = JSON.stringify({ spaces, panes });
 const groups = groupPaths(spaces, panes, bindings, raw);
 assert.deepEqual(groups.map(g => [g.space.id, g.machine, g.folder]), [['a', null, '/repo'], ['b', null, '/repo'], ['remote', 'server', '/repo']]);
-assert.deepEqual(groups.map(g => g.entries.map(e => e.tab.id)), [['split', 'a'], ['b'], ['remote']]);
+assert.deepEqual(groups.map(g => g.entries.map(e => e.tab.id)), [['a', 'split'], ['b'], ['remote']]);
+assert.deepEqual(groups[0].entries.map(e => e.tab.id), spaces[0].tabs.map(t => t.id), 'sidebar rows follow tab order');
 assert.deepEqual(groupPaths([...spaces].reverse(), panes, bindings, raw).map(g => g.id), ['remote', 'b', 'a']);
-assert.deepEqual(groups[0].entries[0].members.map(p => p.pane), ['split-feature', 'split-main']);
-assert.deepEqual(new Set(groups[0].entries[0].worktrees.keys()), new Set(['/worktrees/feature', '/repo']));
+assert.deepEqual(groups[0].entries[1].members.map(p => p.pane), ['split-feature', 'split-main']);
+assert.deepEqual(new Set(groups[0].entries[1].worktrees.keys()), new Set(['/worktrees/feature', '/repo']));
 const singleTreeBindings = { a: { ...bindings.a, worktrees: [trees[0]] } };
 const singleTreePane = groupPaths([spaces[0]], panes, singleTreeBindings, raw)[0].entries.find(entry => entry.tab.id === 'a').members[0];
 assert.equal(singleTreePane.worktree, null);

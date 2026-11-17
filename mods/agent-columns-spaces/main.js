@@ -29,11 +29,16 @@ const sessionIcon = (pane, status, id) => div().size(18).flex_none().relative()
   .child(div().id(`session-icon-${id}`).absolute().left(0).top(0).size(15)
     .child((pane?.program?.icon ? (pane.program.tint ? svg(pane.program.icon).text_color(theme().muted) : image(pane.program.icon)) : svg("icons/shell.svg").text_color(theme().muted)).size(15)))
   .when(["working", "done"].includes(status), el => el.child(statusDot(status, id)));
-// Ping-pong by design: `loop` travels from→to and back in one period, so 3200ms keeps the old 1.6s per leg.
-const workingSweep = (id, _phase, width, color) => div().absolute().left(0).right(0).top(0).bottom(0).rounded(6).overflow_hidden()
-  .child(div().id(id).absolute().left(0).top(0).w(width * 0.55).h_full()
-    .loop("left", { from: -width * 0.605, to: width * 1.05, period: 3200, easing: "linear" })
-    .child(svg("mods/agent-columns-spaces/working-sweep.svg").size_full().text_color(color)));
+// There and back with a dwell at each end: native `loop` has no pause, so phases drive transitions.
+const sweepLeft = -0.605, sweepRight = 1.05;
+const workingSweep = (id, phase, width, color) => {
+  const position = phase === 1 ? sweepRight : sweepLeft;
+  const duration = phase === 1 || phase === 2 ? 1600 : 0;
+  return div().absolute().left(0).right(0).top(0).bottom(0).rounded(6).overflow_hidden()
+    .child(div().id(id).absolute().left(width * position).top(0).w(width * 0.55).h_full()
+      .transition("left", { duration, easing: "linear" })
+      .child(svg("mods/agent-columns-spaces/working-sweep.svg").size_full().text_color(color)));
+};
 // Small clickable glyph; stops the click so the row behind it doesn't also fire.
 const btn = (id, icon, fn) => div().id(id).flex_none().size(22).flex().items_center().justify_center().rounded(6)
   .text_color(theme().muted).cursor_pointer().hover((s) => s.bg(theme().hover).text_color(theme().foreground))
@@ -101,6 +106,15 @@ export default class SpacesTabs extends View {
       if (this.hasWorking && globalThis.window.is_window_active()) cx.notify();
     });
     cx.timer.every(60000, cx => { if (!this.hasWorking) cx.notify(); });
+    // 0 left (start) → 1 right (1.6s) → dwell 0.7s → 2 left (1.6s) → dwell 0.7s → repeat
+    cx.timer.every(4600, cx => {
+      if (!this.hasWorking) return;
+      this.sweepPhase = 0;
+      cx.notify();
+      cx.timer.after(60, cx => { this.sweepPhase = 1; cx.notify(); });
+      cx.timer.after(2360, cx => { this.sweepPhase = 2; cx.notify(); });
+      cx.timer.after(3960, cx => { this.sweepPhase = 3; cx.notify(); });
+    });
   }
   syncDragFocus(cx) {
     const ids = new Set(spaces().map(space => space.id));
@@ -290,8 +304,19 @@ export default class SpacesTabs extends View {
     }
     return v_flex().id("spaces-root").size_full().bg(t.chrome).px(8).pb(8).overflow_y_scrollbar()
       .on_size_change((size, cx) => { if (this.width !== size.width) { this.width = size.width; cx.notify(); } })
-      .on_hover((hovered, cx) => { if (!hovered && this.pressedSpace) { this.pressedSpace = null; this.overSpace = null; this.draggingSpace = false; cx.notify(); } })
-      .on_mouse_up("left", (_event, cx) => { if (this.pressedSpace) { this.pressedSpace = null; this.overSpace = null; this.draggingSpace = false; cx.notify(); } })
+      .on_hover((hovered, cx) => {
+        if (hovered) return;
+        let changed = false;
+        if (this.pressedSpace) { this.pressedSpace = null; this.overSpace = null; this.draggingSpace = false; changed = true; }
+        if (this.pressedTab) { this.pressedTab = null; this.overTab = null; this.draggingTab = false; changed = true; }
+        if (changed) cx.notify();
+      })
+      .on_mouse_up("left", (_event, cx) => {
+        let changed = false;
+        if (this.pressedSpace) { this.pressedSpace = null; this.overSpace = null; this.draggingSpace = false; changed = true; }
+        if (this.pressedTab) { this.pressedTab = null; this.overTab = null; this.draggingTab = false; changed = true; }
+        if (changed) cx.notify();
+      })
       .child(h_flex().id("spaces-header").h(30).flex_none().px(8).gap(6).items_center().text_size(11.5).text_color(t.dim).cursor_pointer()
         .tooltip(blockCollapsed("spaces") ? "展开 Spaces" : "折叠 Spaces").hover(s => s.bg(t.hover))
         .on_click((_event, cx) => { cx.stop_propagation(); toggleBlock("spaces"); })
@@ -401,6 +426,32 @@ export default class SpacesTabs extends View {
               .tooltip(unreadDone ? `${name} · 已完成，待查看` : name)
               .on_click(() => { run("space.select", { id: sp.id }); run("tab.select", { id: tb.id }); if (parentPane) run("pane.focus", { pane: parentPane.pane }); })
               .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); menu("tab", { id: tb.id, space: sp.id }); })
+              .on_mouse_move((event, cx) => {
+                if (!this.pressedTab) return;
+                const dragging = this.draggingTab || Math.hypot(event.position.x - this.pressPosition.x, event.position.y - this.pressPosition.y) >= 5;
+                const over = dragging ? tb.id : null;
+                const after = event.local_position.y >= event.bounds.height / 2;
+                if (dragging !== this.draggingTab || over !== this.overTab || after !== this.dropAfter) {
+                  this.draggingTab = dragging; this.overTab = over; this.dropAfter = after; cx.notify();
+                }
+              })
+              .on_mouse_up("left", (_event, cx) => {
+                if (!this.pressedTab) return;
+                const from = this.pressedTab, over = this.overTab, after = this.dropAfter, dragging = this.draggingTab;
+                this.pressedTab = null; this.overTab = null; this.draggingTab = false;
+                if (dragging && over && from !== over) {
+                  const fromIndex = sp.tabs.findIndex(tab => tab.id === from);
+                  const targetIndex = sp.tabs.findIndex(tab => tab.id === over);
+                  if (fromIndex !== -1 && targetIndex !== -1) {
+                    const index = targetIndex - (fromIndex < targetIndex ? 1 : 0) + (after ? 1 : 0);
+                    if (index !== fromIndex) run("tab.move", { id: from, index: index + 1 });
+                  }
+                  cx.stop_propagation();
+                }
+                cx.notify();
+              })
+              .when(this.draggingTab && this.pressedTab === tb.id, el => el.opacity(0.5))
+              .when(this.draggingTab && this.overTab === tb.id && this.pressedTab !== tb.id, el => el.child(div().absolute().left(4).right(4).when(this.dropAfter, line => line.bottom(0)).when(!this.dropAfter, line => line.top(0)).h(2).bg(t.accent)))
               .when(entryIndex < group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).bottom(0).w(1).bg(t.dim + "4d")).child(div().absolute().left(16).top(15).w(15).h(1).bg(t.dim + "4d")))
               .when(entryIndex === group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).w(15).h(16).border_l(1).border_b(1).border_color(t.dim + "59").rounded_bl(5)))
               .when(Boolean(rowPane), el => el.child(sessionIcon(rowPane, expanded ? states.get(rowPane.pane) : status, `tab-${tb.id}`)))
@@ -428,6 +479,10 @@ export default class SpacesTabs extends View {
               .when(Boolean(elapsed), el => el.child(div().flex_none().text_size(10).text_color(t.working)
                 .tooltip(nativeStart ? "本轮 agent 已工作时长" : "缺少原生开始时间，从本次观察到 Working 起计时")
                 .child(elapsed)))
+              .when(this.hoveredTab === tb.id, el => el.child(div().id(`drag-tab-${tb.id}`).size(14).flex_none().flex().items_center().justify_center().text_size(12).text_color(t.dim)
+                .hover(s => s.text_color(t.muted)).cursor_grab().tooltip("拖动排序；顺序与顶部标签页一致").role("button").accessibility_label(`调整 ${name} 顺序`)
+                .on_mouse_down("left", (event, cx) => { cx.stop_propagation(); this.pressedTab = tb.id; this.pressPosition = event.position; this.overTab = null; this.draggingTab = false; })
+                .on_click((_event, cx) => cx.stop_propagation()).child("⋮⋮")))
               .when(Boolean(splitTarget) && this.hoveredTab === tb.id, el => el.child(splitButton(splitTarget, `${group.id}-${tb.id}`)))
               .when(Boolean(rowPane) && this.hoveredTab === tb.id, el => el.child(btn(`pane-close-${rowPane.pane}`, "x", () => run("pane.close", { pane: rowPane.pane })))),
             ...(mine.length > 1 && !folded[tb.id] ? [v_flex().id(`pane-tree-${group.id}-${tb.id}`).w_full().flex_none().gap(0).children(childPanes.map((p, index) =>

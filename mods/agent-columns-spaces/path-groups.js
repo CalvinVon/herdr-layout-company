@@ -7,6 +7,15 @@ export const activity = (tab, members, raw) => Math.max(tab.changed_at ?? 0, ...
   return terminal?.status_ms ?? terminal?.created_ms ?? 0;
 }));
 
+// Main agent first, then its sub-agents, then plain terminals and other panes.
+/** @param {any} pane @param {Map<string,any>} raw */
+const roleRank = (pane, raw) => {
+  const terminal = raw.get(pane.terminal);
+  if (!terminal) return 2;
+  if (terminal.parent) return 1;
+  return pane.program?.agent || pane.status || pane.app ? 0 : 2;
+};
+
 /** @param {import('herdr').SpaceInfo[]} spaces @param {import('herdr').PaneInfo[]} panes @param {Record<string,import('./project-bindings.js').Binding>} bindings @param {Map<string,any>} raw */
 export function groupPaths(spaces, panes, bindings, raw) {
   return spaces.map(space => {
@@ -20,10 +29,11 @@ export function groupPaths(spaces, panes, bindings, raw) {
         if (worktree) worktrees.set(worktree.path, `worktree · ${worktree.name}`);
         return { ...pane, worktree, gitTree: tree, workspaceFolder: binding.terminalFolders?.[pane.terminal] ?? raw.get(pane.terminal)?.cwd ?? pane.cwd };
       });
-      members.sort((a, b) => activity({ changed_at: 0 }, [b], raw) - activity({ changed_at: 0 }, [a], raw));
+      members.sort((a, b) => roleRank(a, raw) - roleRank(b, raw) || activity({ changed_at: 0 }, [b], raw) - activity({ changed_at: 0 }, [a], raw));
       return { space, tab, members, worktrees, latest: activity(tab, members, raw) };
     });
-    entries.sort((a, b) => b.latest - a.latest);
+    // Tab order is the source of truth: a row dropped here moves the same tab the top bar shows.
+    entries.sort((a, b) => space.tabs.findIndex(tab => tab.id === a.tab.id) - space.tabs.findIndex(tab => tab.id === b.tab.id));
     return { id: space.id, projectKey: binding.folders ? `space:${space.id}` : binding.projectKey, folder: binding.folders?.[0]?.path ?? binding.root, name: space.named ? space.name : binding.name, machine: binding.machine,
       space, binding, duplicateOf: !binding.folders && primary && primary.id !== space.id ? primary.id : null, entries, active: space.active, latest: Math.max(0, ...entries.map(entry => entry.latest)) };
   });
