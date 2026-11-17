@@ -332,7 +332,7 @@ export default class SpacesTabs extends View {
             cx.notify();
           })
           .children([
-        h_flex().id(`folder-${group.id}`).relative().items_center().gap(7).px(8).py(5).rounded(6)
+        h_flex().id(`folder-${group.id}`).relative().items_center().gap(7).px(8).py(6).rounded(6)
           .bg(t.chrome + "00")
           .when(Boolean(folded[group.id]) && group.entries.some(entry => entry.members.some(pane => states.get(pane.pane) === "working")), el => el.child(workingSweep(`sweep-space-${group.id}`, this.sweepPhase, sweepWidth, spaceColor(group.space, i))))
           .on_hover((hovered, cx) => { this.hoveredSpace = hovered ? group.id : (this.hoveredSpace === group.id ? null : this.hoveredSpace); cx.notify(); })
@@ -349,28 +349,29 @@ export default class SpacesTabs extends View {
             .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
             .on_click((_event, cx) => { cx.stop_propagation(); activateSpace(group); })
             .child(avatar({ ...group.space, name: group.name }, i)))
-          .child(div().id(`folder-title-${group.id}`).flex_1().min_w(0).truncate().text_size(13).text_color(group.active || group.id === activeOffice ? t.foreground : t.muted)
+          .child(div().id(`folder-title-${group.id}`).flex_1().min_w(0).truncate().text_size(13.5).font_semibold().text_color(group.active || group.id === activeOffice ? t.foreground : t.muted)
             .tooltip(sessionTabs(group.space, all).length ? (folded[group.id] ? "展开 Space" : "折叠 Space") : "打开 Space 首页")
             .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
             .on_click((_event, cx) => { cx.stop_propagation(); activateSpace(group); })
             .child(group.machine ? `${group.name} · ${group.machine}` : group.name))
-          .child(div().id(`manage-folders-${group.id}`).text_size(10).text_color(t.dim).cursor_pointer().tooltip("管理 Space 文件夹")
-            .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
-            .on_click((_event, cx) => { cx.stop_propagation(); openOverlay({ mod: "space-folders", kind: "dialog", width: 560, height: 500, props: { edit: true, space: group.space.id } }); })
-            .child(`${group.binding.folders?.length ?? 1}目录`))
-          .child(div().id(`drag-space-${group.id}`).size(14).flex_none().flex().items_center().justify_center().text_size(16).text_color(t.dim)
-            .hover(s => s.text_color(t.muted))
-            .cursor_grab().tooltip("拖动排序；键盘上下键调整顺序").role("button").accessibility_label(`调整 ${group.name} 顺序`)
-            .when(Boolean(this.dragFocus[group.id]), el => el.track_focus(this.dragFocus[group.id]).tab_index(0))
-            .on_key_down((event, cx) => {
-              const direction = event.key === "up" ? -1 : event.key === "down" ? 1 : 0;
-              if (!direction) return;
-              const ordered = spaces(), index = ordered.findIndex(space => space.id === group.id), next = ordered[index + direction];
-              if (next && (next.machine ?? null) === (group.machine ?? null)) run("space.move", { id: group.id, index: index + direction + 1 });
-              cx.stop_propagation();
-            })
-            .on_mouse_down("left", (event, cx) => { cx.stop_propagation(); this.pressedSpace = group.id; this.pressPosition = event.position; this.overSpace = null; this.draggingSpace = false; })
-            .on_click((_event, cx) => cx.stop_propagation()).child("⋮⋮"))
+          .child(div().id(`space-tail-${group.id}`).w(34).flex_none().flex().items_center().justify_end()
+            .when(this.hoveredSpace !== group.id && this.focusedDrag !== group.id, el => el.child(div().id(`manage-folders-${group.id}`).text_size(10).text_color(t.dim).cursor_pointer().tooltip("管理 Space 文件夹")
+              .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+              .on_click((_event, cx) => { cx.stop_propagation(); openOverlay({ mod: "space-folders", kind: "dialog", width: 560, height: 500, props: { edit: true, space: group.space.id } }); })
+              .child(`${group.binding.folders?.length ?? 1}目录`)))
+            .when(this.hoveredSpace === group.id || this.focusedDrag === group.id, el => el.child(div().id(`drag-space-${group.id}`).size(16).flex_none().flex().items_center().justify_center().text_size(13).text_color(t.dim)
+              .hover(s => s.text_color(t.muted))
+              .cursor_grab().tooltip("拖动排序；键盘上下键调整顺序").role("button").accessibility_label(`调整 ${group.name} 顺序`)
+              .when(Boolean(this.dragFocus[group.id]), el => el.track_focus(this.dragFocus[group.id]).tab_index(0))
+              .on_key_down((event, cx) => {
+                const direction = event.key === "up" ? -1 : event.key === "down" ? 1 : 0;
+                if (!direction) return;
+                const ordered = spaces(), index = ordered.findIndex(space => space.id === group.id), next = ordered[index + direction];
+                if (next && (next.machine ?? null) === (group.machine ?? null)) run("space.move", { id: group.id, index: index + direction + 1 });
+                cx.stop_propagation();
+              })
+              .on_mouse_down("left", (event, cx) => { cx.stop_propagation(); this.pressedSpace = group.id; this.pressPosition = event.position; this.overSpace = null; this.draggingSpace = false; })
+              .on_click((_event, cx) => cx.stop_propagation()).child("⋮⋮"))))
           .child(btn(`folder-tab-${group.id}`, "plus", () => openOverlay({ mod: "space-home", kind: "dialog", width: 860, height: 680, props: { space: group.space.id, launcher: true } }))),
         ...(folded[group.id] ? [] : group.entries).flatMap(({ space: sp, tab: tb, members: mine }, entryIndex) => {
           const splitTarget = mine.find(p => p.focused && p.terminal) ?? mine.find(p => p.terminal);
@@ -398,8 +399,8 @@ export default class SpacesTabs extends View {
               .tooltip(unreadDone ? `${name} · 已完成，待查看` : name)
               .on_click(() => { run("space.select", { id: sp.id }); run("tab.select", { id: tb.id }); if (parentPane) run("pane.focus", { pane: parentPane.pane }); })
               .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); menu("tab", { id: tb.id, space: sp.id }); })
-              .when(entryIndex < group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).bottom(0).w(1).bg(t.dim)).child(div().absolute().left(16).top(15).w(15).h(1).bg(t.dim)))
-              .when(entryIndex === group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).w(15).h(16).border_l(1).border_b(1).border_color(t.dim).rounded_bl(5)))
+              .when(entryIndex < group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).bottom(0).w(1).bg(t.dim + "4d")).child(div().absolute().left(16).top(15).w(15).h(1).bg(t.dim + "4d")))
+              .when(entryIndex === group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).w(15).h(16).border_l(1).border_b(1).border_color(t.dim + "59").rounded_bl(5)))
               .when(Boolean(rowPane), el => el.child(sessionIcon(rowPane, expanded ? states.get(rowPane.pane) : status, `tab-${tb.id}`)))
               .when(!rowPane, el => el.child(div().size(18).flex_none().relative()
                 .child(svg("mods/workspace-chrome/layers.svg").size(15).text_color(t.muted))
@@ -440,10 +441,10 @@ export default class SpacesTabs extends View {
                   run("pane.focus", { pane: p.pane });
                 })
                 .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); menu("pane", { pane: p.pane, terminal: p.terminal }); })
-                .when(entryIndex < group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).bottom(0).w(1).bg(t.dim)))
+                .when(entryIndex < group.entries.length - 1, el => el.child(div().absolute().left(16).top(0).bottom(0).w(1).bg(t.dim + "4d")))
                 .child(div().w(12).h_full().flex_none().relative()
-                  .when(index < childPanes.length - 1, el => el.child(div().absolute().left(5).top(0).bottom(0).w(1).bg(t.dim)).child(div().absolute().left(5).top(14).w(7).h(1).bg(t.dim)))
-                  .when(index === childPanes.length - 1, el => el.child(div().absolute().left(5).top(0).w(7).h(15).border_l(1).border_b(1).border_color(t.dim).rounded_bl(5))))
+                  .when(index < childPanes.length - 1, el => el.child(div().absolute().left(5).top(0).bottom(0).w(1).bg(t.dim + "4d")).child(div().absolute().left(5).top(14).w(7).h(1).bg(t.dim + "4d")))
+                  .when(index === childPanes.length - 1, el => el.child(div().absolute().left(5).top(0).w(7).h(15).border_l(1).border_b(1).border_color(t.dim + "59").rounded_bl(5))))
                 .child(sessionIcon(p, states.get(p.pane), p.pane)
                   .tooltip(raw.get(p.terminal)?.parent ? `子 Agent · 父级：${raw.get(raw.get(p.terminal).parent)?.title || raw.get(p.terminal).parent} (${raw.get(p.terminal).parent})` : paneTitle(p)))
                 .child(div().flex_1().min_w(0).truncate().text_size(11.5)
