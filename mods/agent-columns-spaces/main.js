@@ -29,10 +29,10 @@ const sessionIcon = (pane, status, id) => div().size(18).flex_none().relative()
   .child(div().id(`session-icon-${id}`).absolute().left(0).top(0).size(15)
     .child((pane?.program?.icon ? (pane.program.tint ? svg(pane.program.icon).text_color(theme().muted) : image(pane.program.icon)) : svg("icons/shell.svg").text_color(theme().muted)).size(15)))
   .when(["working", "done"].includes(status), el => el.child(statusDot(status, id)));
-// The sweep runs as one native loop: no redraw timer keeps it moving.
-const workingSweep = (id, _phase, width, color) => div().absolute().left(0).right(0).top(0).bottom(0).rounded(6).overflow_hidden()
-  .child(div().id(id).absolute().left(0).top(0).w(width * 0.55).h_full()
-    .loop("left", { from: -width * 0.605, to: width * 1.05, period: 2300 })
+const workingSweep = (id, phase, width, color) => div().absolute().left(0).right(0).top(0).bottom(0).rounded(6).overflow_hidden()
+  .child(div().id(id).absolute().left(width * (phase === 0 ? -0.605 : phase === 1 ? 0.3 : 1.05)).top(0).w(width * 0.55).h_full().opacity(phase === 2 ? 0 : 1)
+    .transition("left", { duration: phase === 0 ? 0 : phase === 1 ? 1600 : 650, easing: "linear" })
+    .transition("opacity", { duration: phase === 2 ? 650 : 0, easing: "ease-out" })
     .child(svg("mods/agent-columns-spaces/working-sweep.svg").size_full().text_color(color)));
 // Small clickable glyph; stops the click so the row behind it doesn't also fire.
 const btn = (id, icon, fn) => div().id(id).flex_none().size(22).flex().items_center().justify_center().rounded(6)
@@ -101,6 +101,16 @@ export default class SpacesTabs extends View {
       if (this.hasWorking && globalThis.window.is_window_active()) cx.notify();
     });
     cx.timer.every(60000, cx => { if (!this.hasWorking) cx.notify(); });
+    cx.timer.every(2300, cx => {
+      if (!this.hasWorking) return;
+      this.sweepPhase = 0;
+      cx.notify();
+      cx.timer.after(50, cx => {
+        this.sweepPhase = 1;
+        cx.notify();
+        cx.timer.after(1600, cx => { this.sweepPhase = 2; cx.notify(); });
+      });
+    });
   }
   syncDragFocus(cx) {
     const ids = new Set(spaces().map(space => space.id));
@@ -354,24 +364,26 @@ export default class SpacesTabs extends View {
             .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
             .on_click((_event, cx) => { cx.stop_propagation(); activateSpace(group); })
             .child(group.machine ? `${group.name} · ${group.machine}` : group.name))
-          .child(div().id(`space-tail-${group.id}`).w(34).flex_none().flex().items_center().justify_end()
-            .when(this.hoveredSpace !== group.id && this.focusedDrag !== group.id, el => el.child(div().id(`manage-folders-${group.id}`).text_size(10).text_color(t.dim).cursor_pointer().tooltip("管理 Space 文件夹")
+          .child(div().id(`space-tail-${group.id}`).flex_none().flex().items_center().gap(4).justify_end()
+            .child((this.hoveredSpace === group.id || this.focusedDrag === group.id)
+              ? div().id(`drag-space-${group.id}`).size(16).flex_none().flex().items_center().justify_center().text_size(13).text_color(t.dim)
+                  .hover(s => s.text_color(t.muted))
+                  .cursor_grab().tooltip("拖动排序；键盘上下键调整顺序").role("button").accessibility_label(`调整 ${group.name} 顺序`)
+                  .when(Boolean(this.dragFocus[group.id]), el => el.track_focus(this.dragFocus[group.id]).tab_index(0))
+                  .on_key_down((event, cx) => {
+                    const direction = event.key === "up" ? -1 : event.key === "down" ? 1 : 0;
+                    if (!direction) return;
+                    const ordered = spaces(), index = ordered.findIndex(space => space.id === group.id), next = ordered[index + direction];
+                    if (next && (next.machine ?? null) === (group.machine ?? null)) run("space.move", { id: group.id, index: index + direction + 1 });
+                    cx.stop_propagation();
+                  })
+                  .on_mouse_down("left", (event, cx) => { cx.stop_propagation(); this.pressedSpace = group.id; this.pressPosition = event.position; this.overSpace = null; this.draggingSpace = false; })
+                  .on_click((_event, cx) => cx.stop_propagation()).child("⋮⋮")
+              : div().size(16).flex_none())
+            .child(div().id(`manage-folders-${group.id}`).text_size(10).text_color(t.dim).cursor_pointer().tooltip("管理 Space 文件夹")
               .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
               .on_click((_event, cx) => { cx.stop_propagation(); openOverlay({ mod: "space-folders", kind: "dialog", width: 560, height: 500, props: { edit: true, space: group.space.id } }); })
               .child(`${group.binding.folders?.length ?? 1}目录`)))
-            .when(this.hoveredSpace === group.id || this.focusedDrag === group.id, el => el.child(div().id(`drag-space-${group.id}`).size(16).flex_none().flex().items_center().justify_center().text_size(13).text_color(t.dim)
-              .hover(s => s.text_color(t.muted))
-              .cursor_grab().tooltip("拖动排序；键盘上下键调整顺序").role("button").accessibility_label(`调整 ${group.name} 顺序`)
-              .when(Boolean(this.dragFocus[group.id]), el => el.track_focus(this.dragFocus[group.id]).tab_index(0))
-              .on_key_down((event, cx) => {
-                const direction = event.key === "up" ? -1 : event.key === "down" ? 1 : 0;
-                if (!direction) return;
-                const ordered = spaces(), index = ordered.findIndex(space => space.id === group.id), next = ordered[index + direction];
-                if (next && (next.machine ?? null) === (group.machine ?? null)) run("space.move", { id: group.id, index: index + direction + 1 });
-                cx.stop_propagation();
-              })
-              .on_mouse_down("left", (event, cx) => { cx.stop_propagation(); this.pressedSpace = group.id; this.pressPosition = event.position; this.overSpace = null; this.draggingSpace = false; })
-              .on_click((_event, cx) => cx.stop_propagation()).child("⋮⋮"))))
           .child(btn(`folder-tab-${group.id}`, "plus", () => openOverlay({ mod: "space-home", kind: "dialog", width: 860, height: 680, props: { space: group.space.id, launcher: true } }))),
         ...(folded[group.id] ? [] : group.entries).flatMap(({ space: sp, tab: tb, members: mine }, entryIndex) => {
           const splitTarget = mine.find(p => p.focused && p.terminal) ?? mine.find(p => p.terminal);
