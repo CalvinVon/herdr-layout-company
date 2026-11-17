@@ -27,9 +27,9 @@ const statusDot = (status, id) => div().id(`status-dot-${id}`).absolute().right(
   .when(status === "working", dot => dot.loop("top", { from: 9, to: 13, period: 1000 }));
 const sessionIcon = (pane, status, id) => div().size(18).flex_none().relative()
   .child(div().id(`session-icon-${id}`).absolute().left(0).top(0).size(15)
-    .child((pane?.program?.icon ? (pane.program.tint ? svg(pane.program.icon).text_color(theme().muted) : image(pane.program.icon)) : svg("icons/shell.svg").text_color(theme().muted)).size(15)))
+    .child((pane?.program?.key === "omp" ? svg("mods/magpie-live/omp.svg").text_color(theme().muted) : pane?.program?.icon ? (pane.program.tint ? svg(pane.program.icon).text_color(theme().muted) : image(pane.program.icon)) : svg("icons/shell.svg").text_color(theme().muted)).size(15)))
   .when(["working", "done"].includes(status), el => el.child(statusDot(status, id)));
-// There and back with a dwell at each end: native `loop` has no pause, so phases drive transitions.
+// The native loop cannot pause between round trips, so phases drive transitions.
 const sweepLeft = -0.605, sweepRight = 1.05;
 const workingSweep = (id, phase, width, color) => {
   const position = phase === 1 ? sweepRight : sweepLeft;
@@ -106,14 +106,14 @@ export default class SpacesTabs extends View {
       if (this.hasWorking && globalThis.window.is_window_active()) cx.notify();
     });
     cx.timer.every(60000, cx => { if (!this.hasWorking) cx.notify(); });
-    // 0 left (start) → 1 right (1.6s) → dwell 0.7s → 2 left (1.6s) → dwell 0.7s → repeat
-    cx.timer.every(4600, cx => {
+    // Travel out and back continuously, then pause 2.5s before the next round trip.
+    cx.timer.every(5700, cx => {
       if (!this.hasWorking) return;
       this.sweepPhase = 0;
       cx.notify();
       cx.timer.after(60, cx => { this.sweepPhase = 1; cx.notify(); });
-      cx.timer.after(2360, cx => { this.sweepPhase = 2; cx.notify(); });
-      cx.timer.after(3960, cx => { this.sweepPhase = 3; cx.notify(); });
+      cx.timer.after(1660, cx => { this.sweepPhase = 2; cx.notify(); });
+      cx.timer.after(3260, cx => { this.sweepPhase = 3; cx.notify(); });
     });
   }
   syncDragFocus(cx) {

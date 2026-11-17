@@ -9,6 +9,7 @@ import { h_flex, v_flex } from "gpui-base";
 import { panes, terminals, spaces, props, run, openOverlay, closeOverlay, theme, home, shared, setShared, notify } from "herdr";
 
 function icon(p, size, color) {
+  if (p?.key === "omp") return svg("mods/magpie-live/omp.svg").size(size).flex_none().text_color(color);
   if (!p?.icon) return null;
   return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
 }

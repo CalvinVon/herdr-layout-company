@@ -88,9 +88,11 @@ const matches = (a, q, raw, groups) => {
   return [a.tab_name, a.title, a.address, a.program?.name, projectLabel(project), project?.group.folder, project?.group.machine, project?.worktree?.path, project?.worktree?.branch].some((v) => v?.toLowerCase().includes(q));
 };
 const dot = (color, size = 7) => div().size(size).rounded(size).bg(color).flex_none();
-const icon = (program, size = 18) => program?.icon
-  ? (program.tint ? svg(program.icon).text_color(C.ink) : image(program.icon)).size(size).flex_none()
-  : div().size(size).rounded(4).bg(C.violet);
+const icon = (program, size = 18) => program?.key === "omp"
+  ? svg("mods/magpie-live/omp.svg").size(size).flex_none().text_color(C.ink)
+  : program?.icon
+    ? (program.tint ? svg(program.icon).text_color(C.ink) : image(program.icon)).size(size).flex_none()
+    : div().size(size).rounded(4).bg(C.violet);
 const agentTitle = (a) => a.title && (/^\d+$/.test(a.tab_name) || a.tab_name === a.program?.name)
   ? a.title : a.tab_name || a.title || "Agent";
 
