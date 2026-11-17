@@ -21,26 +21,24 @@ const percent = (value) => {
 };
 const periodPath = (base, period) => `${base}/v1/magpie/usage?period=${period}`;
 const countTokens = (value) => value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+const quotaPace = ({ remaining, start, reset }, now = Date.now()) => remaining !== null && start <= now && now < reset && reset > start ? Math.round(remaining - 100 * (reset - now) / (reset - start)) : null;
+const appendBar = (path, x, y, width, height) => {
+  if (width <= 0 || height <= 0) return false;
+  const r = Math.min(1, width / 2, height / 2), c = r * 0.5522847498;
+  const right = x + width, bottom = y + height;
+  path.move_to(x + r, y).line_to(right - r, y)
+    .cubic_bezier_to(right, y + r, right - r + c, y, right, y + r - c)
+    .line_to(right, bottom - r).cubic_bezier_to(right - r, bottom, right, bottom - r + c, right - r + c, bottom)
+    .line_to(x + r, bottom).cubic_bezier_to(x, bottom - r, x + r - c, bottom, x, bottom - r + c)
+    .line_to(x, y + r).cubic_bezier_to(x + r, y, x, y + r - c, x + r - c, y).close();
+  return true;
+};
 
-class RouteDots extends View {
+class ReadStatus extends View {
   init(props) { this.update(props); }
-  update(props) { this.state = props; }
+  update(props) { this.readAt = props.readAt; }
   render() {
-    const { paths = [], start = 0, now = 0, width = 0, height = 0 } = this.state || {};
-    return div().id("route-dot-layer").absolute().left(0).top(0).w(width).h(height).children(paths.map((path, i) => {
-      const cycle = ((now - start + i * 350) % 4800) / 2400;
-      const progress = cycle <= 1 ? cycle : 2 - cycle;
-      const first = progress < 0.45, last = progress > 0.55;
-      const part = first ? progress / 0.45 : last ? (progress - 0.55) / 0.45 : (progress - 0.45) / 0.1;
-      const x1 = first ? path.fromX : path.middle, x2 = last ? path.toX : path.middle;
-      const y1 = first ? path.fromY : path.midLeftY, y2 = last ? path.toY : first ? path.midLeftY : path.midRightY;
-      const inverse = 1 - part;
-      const x = x1 + (x2 - x1) * (3 * inverse * inverse * part * 0.45 + 3 * inverse * part * part * 0.65 + part * part * part);
-      const y = y1 + (y2 - y1) * part * part * (3 - 2 * part);
-      const size = path.current ? 9 : 7;
-      return div().id(path.id).absolute().left(x - size / 2).top(y - size / 2).size(size).rounded_full().bg(path.color).opacity(path.dimmed ? 0.35 : 1)
-        .transition("left", { duration: 160, easing: "linear" }).transition("top", { duration: 160, easing: "linear" });
-    }));
+    return text(this.readAt ? `上次成功读取 · ${new Date(this.readAt).toLocaleTimeString()}` : "等待首次读取", theme().dim, 9);
   }
 }
 
@@ -91,17 +89,11 @@ export default class MagpieLive extends View {
     this.error = "";
     this.readAt = null;
     this.reading = false;
-    this.motionStart = Date.now();
-    this.motionPaths = [];
-    this.motionHasPaths = false;
-    this.motionView = cx.new(RouteDots, { paths: [], start: this.motionStart });
+    this.readStatus = cx.new(ReadStatus, { readAt: null });
+    this.routePaths = new Map();
+    this.barWidths = new Map();
+    this.barPaths = new Map();
     const visible = () => { const panel = layout()?.children?.find((node) => node.id === "magpie-panel"); return Boolean(panel) && !panel.hidden; };
-    cx.timer.every(160, () => {
-      if (this.page !== "routing" || this.hiddenSections.includes("graph") || (!this.motionPaths.length && !this.motionHasPaths)) return;
-      if (!visible() || !globalThis.window.is_window_active()) return;
-      this.motionView.set_props({ paths: this.motionPaths, start: this.motionStart, now: Date.now(), width: this.motionWidth, height: this.motionHeight });
-      this.motionHasPaths = this.motionPaths.length > 0;
-    });
     cx.timer.every(5000, (next) => {
       if (visible() && globalThis.window.is_window_active()) this.refresh(next);
       else this.refreshDeferred = true;
@@ -125,6 +117,22 @@ export default class MagpieLive extends View {
         next.notify();
       }
     });
+  }
+
+  notifyData(cx) {
+    const signature = JSON.stringify([
+      this.page, this.base, this.error, Boolean(this.readAt), this.usage, this.quotas, this.history,
+      this.chartUsage, this.chartError, this.comparison, this.comparisonCache?.baseline,
+      this.chartUsage?.period === "today" ? Math.floor((Date.now() - Date.parse(this.chartUsage.since)) / 3600000) : null,
+      this.page === "routing" && !this.editQuotas && !this.hiddenSections.includes("quotas")
+        ? [...this.quotaData().byProvider.entries()].filter(([provider]) => !this.hiddenProviders.includes(provider))
+          .flatMap(([, entries]) => entries.filter((entry) => entry.window && !this.hiddenQuotas.includes(entry.key)).map((entry) => quotaPace(entry))) : null,
+      this.page === "routing" ? [this.active, this.routes, this.recent, this.recentError, this.groupNames, this.focusTerminal, this.focusSession] : null,
+    ]);
+    if (signature !== this.dataSignature) {
+      this.dataSignature = signature;
+      cx.notify();
+    }
   }
 
   refresh(cx) {
@@ -195,7 +203,7 @@ export default class MagpieLive extends View {
               this.recentError = message;
             } finally {
               this.recentReading = false;
-              if (changed) update.notify();
+              if (changed && this.page === "routing") this.notifyData(update);
             }
           });
         }
@@ -253,19 +261,15 @@ export default class MagpieLive extends View {
         }
         this.quotas = quota.data ?? [];
         this.active = active.active ?? [];
-        if (!this.active.length) this.motionView.set_props({ paths: [], start: this.motionStart });
         this.history = history?.data ?? this.history;
         this.error = "";
         this.readAt = Date.now();
+        if (this.page === "usage") this.readStatus.set_props({ readAt: this.readAt });
       } catch (error) {
         this.error = error instanceof Error ? error.message : "Magpie 暂不可用";
       } finally {
         this.reading = false;
-        const signature = JSON.stringify([this.usage, this.quotas, this.active, this.routes, this.recent, this.error]);
-        if (signature !== this.dataSignature) {
-          this.dataSignature = signature;
-          next.notify();
-        }
+        this.notifyData(next);
         if (period !== this.period || granularity !== this.chartGranularity) this.refresh(next);
       }
     });
@@ -274,6 +278,7 @@ export default class MagpieLive extends View {
   setPage(page, cx) {
     this.page = page;
     localStorage.setItem("magpie-live.page", page);
+    if (page === "usage") this.readStatus.set_props({ readAt: this.readAt });
     cx.notify();
   }
 
@@ -301,10 +306,68 @@ export default class MagpieLive extends View {
 
 
 
+  quotaData() {
+    if (this.quotaDerived?.quotas === this.quotas && this.quotaDerived?.history === this.history) return this.quotaDerived;
+    const histories = new Map(), byProvider = new Map(), byQuota = new Map();
+    for (const row of this.history) {
+      if (!histories.has(row.provider)) histories.set(row.provider, new Map());
+      const users = histories.get(row.provider);
+      if (users.has(row.user)) continue;
+      const lines = new Map();
+      for (const line of row.lines ?? []) if (!lines.has(line.name)) lines.set(line.name, line.points ?? []);
+      users.set(row.user, lines);
+    }
+    for (const quota of this.quotas ?? []) {
+      const lines = histories.get(quota.provider)?.get(quota.user);
+      const entries = (quota.windows?.length ? quota.windows : [null]).map((window) => {
+        const used = percent(window?.used), remaining = percent(window?.remaining) ?? (used === null ? null : 100 - used);
+        const reset = Date.parse(window?.resetsAt), points = lines?.get(window?.name) ?? [];
+        let start = NaN;
+        for (let i = points.length - 1; i >= 0; i--) {
+          if (Math.abs(Date.parse(points[i].resetsAt) - reset) < 120000 && points[i].start) { start = Date.parse(points[i].start); break; }
+        }
+        return { quota, window, key: JSON.stringify([quota.provider, quota.user || "", window?.name ?? null]), remaining, reset, start, points };
+      });
+      if (!byProvider.has(quota.provider)) byProvider.set(quota.provider, []);
+      byProvider.get(quota.provider).push(...entries);
+      byQuota.set(quota, entries);
+    }
+    this.quotaDerived = { quotas: this.quotas, history: this.history, byProvider, byQuota };
+    const chartIds = new Set(["usage-chart-bars"]);
+    (this.quotas ?? []).forEach((quota, i) => (quota.windows ?? []).forEach((_window, wi) => chartIds.add(`quota-trend-${i}-${wi}`)));
+    for (const key of this.barPaths.keys()) if (!chartIds.has(key)) this.barPaths.delete(key);
+    for (const key of this.barWidths.keys()) if (!chartIds.has(key)) this.barWidths.delete(key);
+    return this.quotaDerived;
+  }
+
+  chartBars(id, bars, height, t) {
+    const width = this.barWidths.get(id) ?? 0;
+    let geometry = this.barPaths.get(id);
+    if (!geometry || geometry.bars !== bars || geometry.width !== width || geometry.height !== height) {
+      const current = PathBuilder.fill(), previous = PathBuilder.fill();
+      let currentCount = 0, previousCount = 0;
+      const groupWidth = bars.length ? Math.max(0, (width - (bars.length - 1)) / bars.length) : 0;
+      bars.forEach((bar, i) => {
+        const paired = bar.previousHeight !== null;
+        const barWidth = paired ? Math.max(0, (groupWidth - 1) / 2) : groupWidth;
+        const x = i * (groupWidth + 1);
+        if (paired) previousCount += Number(appendBar(previous, x, height - bar.previousHeight, barWidth, bar.previousHeight));
+        currentCount += Number(appendBar(current, x + (paired ? barWidth + 1 : 0), height - bar.currentHeight, barWidth, bar.currentHeight));
+      });
+      geometry = { bars, width, height, current: currentCount ? current.build() : null, previous: previousCount ? previous.build() : null };
+      this.barPaths.set(id, geometry);
+    }
+    return h_flex().id(id).relative().w_full().h(height).gap(1).items_end()
+      .on_size_change((size, cx) => { if (this.barWidths.get(id) !== size.width) { this.barWidths.set(id, size.width); cx.notify(); } })
+      .when(Boolean(geometry.previous), row => row.child(globalThis.window.paint_path(geometry.previous, t.muted).absolute().left(0).top(0).w(width).h(height).opacity(0.45)))
+      .when(Boolean(geometry.current), row => row.child(globalThis.window.paint_path(geometry.current, t.accent).absolute().left(0).top(0).w(width).h(height)))
+      .children(bars.filter((bar) => bar.description !== undefined).map((bar) => div().flex_1().min_w(0).h_full().tooltip(bar.description)));
+  }
+
   quotaCards(t) {
+    const data = this.quotaData();
     return (this.quotas ?? []).map((quota, i) => {
       const windows = quota.windows ?? [];
-      const history = this.history?.find((row) => row.provider === quota.provider && row.user === quota.user);
       return card(t).id(`quota-${i}`)
         .child(h_flex().justify_between().items_center()
           .child(text(quota.name || quota.provider, t.foreground, 12))
@@ -317,7 +380,15 @@ export default class MagpieLive extends View {
           const used = reportedUsed ?? (remaining === null ? null : 100 - remaining);
           const shown = this.showRemaining ? remaining : used;
           const reset = window.resetsAt ? new Date(window.resetsAt).toLocaleString() : "";
-          const points = history?.lines?.find((line) => line.name === window.name)?.points?.slice(-24) ?? [];
+          const entry = data.byQuota.get(quota)[wi];
+          if (!entry.trend || entry.trendRemaining !== this.showRemaining) {
+            entry.trendRemaining = this.showRemaining;
+            entry.trend = entry.points.slice(-24).map((point) => {
+              const left = percent(point.left), value = left === null ? 0 : this.showRemaining ? left : 100 - left;
+              return { currentHeight: 20 * value / 100, previousHeight: null };
+            });
+          }
+          const points = entry.trend;
           const barWidth = Math.max(0, this.width - 36);
           return v_flex().id(`quota-window-${i}-${wi}`).gap(4)
             .child(h_flex().justify_between()
@@ -325,11 +396,7 @@ export default class MagpieLive extends View {
               .child(text(shown === null ? "数据不足" : `${this.showRemaining ? "剩余" : "已用"} ${shown.toFixed(1)}%`, t.muted, 10)))
             .child(div().w_full().h(4).relative().rounded(2).bg(t.border)
               .child(div().absolute().left(0).top(0).bottom(0).w(barWidth * (shown ?? 0) / 100).rounded(2).bg(remaining !== null && remaining < 10 ? t.blocked : t.accent)))
-            .when(points.length > 1, row => row.child(text("最近 24 次额度读数", t.dim, 9)).child(h_flex().h(22).gap(1).items_end().children(points.map((point, pi) => {
-              const left = percent(point.left);
-              const value = left === null ? 0 : this.showRemaining ? left : 100 - left;
-              return div().id(`quota-trend-${i}-${wi}-${pi}`).flex_1().h(20 * value / 100).rounded(1).bg(t.accent);
-            }))))
+            .when(points.length > 1, row => row.child(text("最近 24 次额度读数", t.dim, 9)).child(this.chartBars(`quota-trend-${i}-${wi}`, points, 22, t)))
             .when(Boolean(reset), row => row.child(text(`重置于 ${reset}`, t.dim, 9)))
             .when(Boolean(window.holdsWhy), row => row.child(text(window.holdsWhy, t.blocked, 9)));
         }))
@@ -341,16 +408,13 @@ export default class MagpieLive extends View {
   }
 
   providerQuotas(t) {
-    const quotas = this.quotas ?? [];
-    const names = [...new Set(quotas.map((quota) => quota.provider))];
+    const { byProvider } = this.quotaData();
+    const names = [...byProvider.keys()];
     const order = [...this.providerOrder.filter((name) => names.includes(name)), ...names.filter((name) => !this.providerOrder.includes(name))];
     if (!order.length) return text("暂无额度数据", t.dim, 10);
-    const keyFor = (quota, window) => JSON.stringify([quota.provider, quota.user || "", window?.name ?? null]);
     const groups = order.map((provider, i) => {
-      const entries = quotas.filter((quota) => quota.provider === provider).flatMap((quota) =>
-        (quota.windows?.length ? quota.windows : [null]).map((window) => ({ quota, window, key: keyFor(quota, window) })))
-        .filter(({ key }) => this.editQuotas || !this.hiddenQuotas.includes(key));
       if (this.hiddenProviders.includes(provider) && !this.editQuotas) return null;
+      const entries = byProvider.get(provider).filter(({ key }) => this.editQuotas || !this.hiddenQuotas.includes(key));
       if (!entries.length) return null;
       const move = (direction, cx) => {
         const next = [...order];
@@ -369,16 +433,10 @@ export default class MagpieLive extends View {
           .when(this.editQuotas, row => row.child(div().id(`provider-visibility-${i}`).cursor_pointer().text_size(9).text_color(t.accent).on_click((_e, cx) => { this.hiddenProviders = this.hiddenProviders.includes(provider) ? this.hiddenProviders.filter((name) => name !== provider) : [...this.hiddenProviders, provider]; localStorage.setItem("magpie-live.hidden-providers", JSON.stringify(this.hiddenProviders)); cx.notify(); }).child(this.hiddenProviders.includes(provider) ? "显示" : "隐藏")))
           .when(i > 0, row => row.child(div().id(`quota-up-${i}`).cursor_pointer().text_color(t.dim).opacity(0.6).tooltip("前移").on_click((_e, cx) => move(-1, cx)).child("‹")))
           .when(i < order.length - 1, row => row.child(div().id(`quota-down-${i}`).cursor_pointer().text_color(t.dim).opacity(0.6).tooltip("后移").on_click((_e, cx) => move(1, cx)).child("›"))))
-        .children(entries.map(({ quota, window, key }, index) => {
+        .children(entries.map((entry, index) => {
+          const { quota, window, key, remaining } = entry;
           const hidden = this.hiddenQuotas.includes(key);
-          const used = percent(window?.used);
-          const remaining = percent(window?.remaining) ?? (used === null ? null : 100 - used);
-          const history = this.history.find((row) => row.provider === provider && row.user === quota.user);
-          const reset = Date.parse(window?.resetsAt);
-          const points = history?.lines?.find((line) => line.name === window?.name)?.points ?? [];
-          const point = [...points].reverse().find((p) => Math.abs(Date.parse(p.resetsAt) - reset) < 120000 && p.start);
-          const start = Date.parse(point?.start), now = Date.now();
-          const pace = remaining !== null && start <= now && now < reset && reset > start ? Math.round(remaining - 100 * (reset - now) / (reset - start)) : null;
+          const pace = quotaPace(entry);
           const account = quota.user ? (this.maskAccounts ? shortAccount(quota.user) : quota.user) : "";
           const label = [account, window?.name || (quota.balance != null ? "余额" : "额度")].filter(Boolean).join(" · ");
           const value = window ? (remaining === null ? "—" : `${remaining.toFixed(0)}%`) : quota.balance != null ? String(quota.balance) : "—";
@@ -428,11 +486,21 @@ export default class MagpieLive extends View {
     const chartPeriod = usageChartPeriod(this.period, this.chartGranularity);
     const rangeLabel = chartPeriod === "today" ? "今天" : chartPeriod === "7d" ? "近 7 天" : "近 30 天";
     const comparable = usage?.period === this.usage?.period && Boolean(this.comparison);
-    const points = usageChartData(usage, this.comparisonCache?.baseline, comparable, metric);
-    const max = Math.max(0, ...points.flatMap((point) => [point.current, point.previous ?? 0]));
-    const format = (value) => metric === "cost" ? `≈$${value.toFixed(value > 0 && value < 1 ? 3 : 2)}` : countTokens(value);
-    const hasPrevious = points.some((point) => point.previous !== null);
-    const partialCost = metric === "cost" && points.some((point) => point.unpriced);
+    const baseline = this.comparisonCache?.baseline, now = new Date();
+    const hour = usage?.period === "today" ? Math.max(0, Math.min(24, Math.floor((now.getTime() - Date.parse(usage.since)) / 3600000))) : null;
+    let data = this.chartDerived;
+    if (!data || data.usage !== usage || data.baseline !== baseline || data.comparable !== comparable || data.metric !== metric || data.hour !== hour) {
+      const points = usageChartData(usage, baseline, comparable, metric, now);
+      const max = Math.max(0, ...points.flatMap((point) => [point.current, point.previous ?? 0]));
+      const format = (value) => metric === "cost" ? `≈$${value.toFixed(value > 0 && value < 1 ? 3 : 2)}` : countTokens(value);
+      const height = (value) => value > 0 && max > 0 ? Math.max(2, Math.round(value / max * 52)) : 0;
+      const bars = points.map((point, i) => ({
+        currentHeight: height(point.current), previousHeight: point.previous === null ? null : height(point.previous),
+        description: `${point.label || `时段 ${i + 1}`} · 本期 ${format(point.current)}${point.previous !== null ? ` · 对照 ${point.previousLabel || ""} ${format(point.previous)}` : ""}${point.unpriced ? " · 部分费用未计价" : ""}`,
+      }));
+      data = this.chartDerived = { usage, baseline, comparable, metric, hour, points, bars, maxLabel: format(max), hasPrevious: points.some((point) => point.previous !== null), partialCost: metric === "cost" && points.some((point) => point.unpriced) };
+    }
+    const { points, bars, maxLabel, hasPrevious, partialCost } = data;
     const label = CHART_METRICS.find(([id]) => id === metric)?.[1] || "请求";
     return v_flex().id("usage-chart").gap(6).p(8).rounded(8).bg(t.raised)
       .child(h_flex().items_center().justify_between().gap(4)
@@ -449,16 +517,9 @@ export default class MagpieLive extends View {
       .when(points.length > 0, view => view
         .child(h_flex().items_center().gap(5).child(div().size(5).rounded(1).bg(t.accent)).child(text("本期", t.muted, 9))
           .when(hasPrevious, row => row.child(div().size(5).rounded(1).bg(t.muted).opacity(0.45)).child(text("前周期", t.muted, 9)))
-          .child(div().flex_1()).child(text(`最高 ${format(max)}`, t.dim, 9)))
-        .child(h_flex().id("usage-chart-bars").w_full().h(56).gap(1).items_end().border_b(1).border_color(t.border)
-          .role("image").accessibility_label(`${label}走势，${points.length}个时段，最高${format(max)}${hasPrevious ? "，包含前周期对照" : ""}`)
-          .children(points.map((point, i) => {
-            const describe = `${point.label || `时段 ${i + 1}`} · 本期 ${format(point.current)}${point.previous !== null ? ` · 对照 ${point.previousLabel || ""} ${format(point.previous)}` : ""}${point.unpriced ? " · 部分费用未计价" : ""}`;
-            const height = (value) => value > 0 && max > 0 ? Math.max(2, Math.round(value / max * 52)) : 0;
-            return h_flex().flex_1().min_w(0).h_full().gap(1).items_end().tooltip(describe)
-              .when(point.previous !== null, group => group.child(div().flex_1().min_w(0).h(height(point.previous)).rounded(1).bg(t.muted).opacity(0.45)))
-              .child(div().flex_1().min_w(0).h(height(point.current)).rounded(1).bg(t.accent));
-          })))
+          .child(div().flex_1()).child(text(`最高 ${maxLabel}`, t.dim, 9)))
+        .child(this.chartBars("usage-chart-bars", bars, 55, t).h(56).border_b(1).border_color(t.border)
+          .role("image").accessibility_label(`${label}走势，${points.length}个时段，最高${maxLabel}${hasPrevious ? "，包含前周期对照" : ""}`))
         .child(h_flex().justify_between().child(text(points[0].label || "开始", t.dim, 9)).child(text(points[points.length - 1].label || "当前", t.dim, 9)))
         .when(Boolean(usage.series?.length > 30), body => body.child(text("展示最近 30 个时段", t.dim, 9)))
         .when(partialCost, body => body.child(text("部分费用未计价，图中仅含已计价金额", t.dim, 9))));
@@ -491,7 +552,6 @@ export default class MagpieLive extends View {
       const focusedType = focusedAgent?.app || focusedAgent?.program?.key;
       const currentSession = focusTerminal === this.focusTerminal ? this.focusSession : null;
       const current = (request) => Boolean(currentSession && request.session === currentSession);
-      const currentActive = active.some(current);
       const status = (request) => request.live ? "正在回答" : request.status >= 400 ? `失败 ${request.status}` : request.status ? `${request.status}` : "状态未知";
       const provider = (request) => request.provider || request.providerName || "未知来源";
       const sessionKey = (request) => request.session || `request-${request.route_id ?? request.id}`;
@@ -501,8 +561,8 @@ export default class MagpieLive extends View {
         const attempt = route && String(route.id) === String(request.route_id) ? route.tries?.[route.tries.length - 1] : null;
         return request.served || attempt?.model || (!request.live ? request.model : null) || "等待模型";
       };
-      const sourceNames = [...new Set(active.map(sourceKey))];
-      const providerNames = [...new Set(active.map(provider))];
+      const sourceNames = this.hiddenSections.includes("graph") ? [] : [...new Set(active.map(sourceKey))];
+      const providerNames = this.hiddenSections.includes("graph") ? [] : [...new Set(active.map(provider))];
       const stageWidth = Math.max(200, Math.min(260, this.width - 20));
       const edge = 90;
       const middle = stageWidth / 2;
@@ -518,16 +578,22 @@ export default class MagpieLive extends View {
         }
         return this.sessionColors.get(key);
       };
-      const flows = active;
       const nodeHeight = 24;
       const totalHeight = (names) => names.length * nodeHeight + Math.max(0, names.length - 1) * 8;
       const stageHeight = Math.max(86, totalHeight(sourceNames) + 16, totalHeight(providerNames) + 16);
       const nodeY = (names, index) => (stageHeight - totalHeight(names)) / 2 + index * (nodeHeight + 8) + nodeHeight / 2;
       const hubY = stageHeight / 2;
       const hubHeight = 24;
+      const geometryKey = `${stageWidth}|${stageHeight}|${sourceNames.length}|${providerNames.length}`;
+      if (geometryKey !== this.routeGeometryKey) { this.routeGeometryKey = geometryKey; this.routePaths.clear(); }
       const line = (x1, y1, x2, y2, color) => {
-        const dx = x2 - x1;
-        const path = PathBuilder.stroke(1).move_to(x1, y1).cubic_bezier_to(x2, y2, x1 + dx * 0.45, y1, x2 - dx * 0.35, y2).build();
+        const key = `${x1}|${y1}|${x2}|${y2}`;
+        let path = this.routePaths.get(key);
+        if (!path) {
+          const dx = x2 - x1;
+          path = PathBuilder.stroke(1).move_to(x1, y1).cubic_bezier_to(x2, y2, x1 + dx * 0.45, y1, x2 - dx * 0.35, y2).build();
+          this.routePaths.set(key, path);
+        }
         return window.paint_path(path, color).absolute().left(0).top(0).w(stageWidth).h(stageHeight);
       };
       const icon = (name) => {
@@ -539,25 +605,9 @@ export default class MagpieLive extends View {
         return program?.icon ? (program.tint ? svg(program.icon).text_color(t.muted) : image(program.icon)).size(12).flex_none()
           : svg("icons/program.svg").size(12).flex_none().text_color(t.dim);
       };
-      this.motionWidth = stageWidth;
-      this.motionHeight = stageHeight;
-      this.motionPaths = flows.map((request, i) => ({
-        id: `flow-${request.route_id ?? i}-${i}`,
-        fromX: edge,
-        fromY: nodeY(sourceNames, sourceNames.indexOf(sourceKey(request))),
-        middle,
-        midLeftY: hubY,
-        midRightY: hubY,
-        toX: stageWidth - edge,
-        toY: nodeY(providerNames, providerNames.indexOf(provider(request))),
-        color: sessionColor(request),
-        current: current(request),
-        dimmed: currentActive && !current(request),
-      }));
-      const graph = div().relative().w(stageWidth).h(stageHeight).bg(t.surface)
+      const graph = () => div().relative().w(stageWidth).h(stageHeight).bg(t.surface)
         .children(sourceNames.map((name, i) => line(edge, nodeY(sourceNames, i), middle, hubY, t.muted)))
         .children(providerNames.map((name, i) => line(middle, hubY, stageWidth - edge, nodeY(providerNames, i), t.muted)))
-        .child(this.motionView)
         .children(sourceNames.map((name, i) => h_flex().absolute().left(14).top(nodeY(sourceNames, i) - nodeHeight / 2).w(76).h(nodeHeight).px(5).gap(3).items_center().rounded(4).bg(t.raised).tooltip(name)
           .child(icon(name)).child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(name))))
         .children(providerNames.map((name, i) => {
@@ -573,7 +623,7 @@ export default class MagpieLive extends View {
       const sessionId = currentSession || active[0]?.session || requests[0]?.session;
       const session = (usage?.sessions ?? []).find((item) => item.id === sessionId);
       const promptTokens = session ? (session.input || 0) + (session.cache_read || 0) + (session.cache_write || 0) : 0;
-      const sessionMetrics = session ? [
+      const sessionMetrics = () => session ? [
         `${session.calls} 次请求`,
         `${countTokens(promptTokens + (session.output || 0))} token`,
         promptTokens ? `缓存 ${Math.round((session.cache_read || 0) * 100 / promptTokens)}%` : null,
@@ -581,7 +631,7 @@ export default class MagpieLive extends View {
         session.unpriced ? `已计价 ≈$${Number(session.cost || 0).toFixed(3)} · 部分未计价` : session.cost != null ? `≈$${Number(session.cost).toFixed(3)}` : null,
       ].filter(Boolean).join(" · ") : "该时间段暂无统计";
       const currentRoutes = active.filter(current);
-      const activeRows = [...currentRoutes, ...active.filter((request) => !current(request))].map((request, i) => {
+      const activeRows = () => [...currentRoutes, ...active.filter((request) => !current(request))].map((request, i) => {
         const latest = this.routes[request.session];
         const route = latest && String(latest.id) === String(request.route_id) ? latest : null;
         const reason = route?.rule?.when?.length ? route.rule.when.join(" · ") : route ? "网关未提供命中原因" : "等待路由决策";
@@ -597,9 +647,9 @@ export default class MagpieLive extends View {
           .child(text(`原因 · ${reason}`, t.muted, 10))
           .child(text(`回答中 · ${((request.ms || 0) / 1000).toFixed(1)} 秒`, t.working, 9))
           .when(current(request) && i === 0, row => row.child(div().pt(4).border_t(1).border_color(t.border)
-            .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} · ${sessionId.slice(-8)} · ${sessionMetrics}`, t.muted, 10))));
+            .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} · ${sessionId.slice(-8)} · ${sessionMetrics()}`, t.muted, 10))));
       });
-      const rows = requests.map((request, i) => {
+      const rows = () => requests.map((request, i) => {
         const expanded = this.selectedRoute != null && String(this.selectedRoute) === String(request.route_id);
         const latest = this.routes[request.session];
         // shortcut: the public route API exposes only each session's latest route; match IDs before showing attempts.
@@ -625,7 +675,7 @@ export default class MagpieLive extends View {
             .when(!route, detail => detail.child(text("此历史请求的详细尝试不可用", t.dim, 9)))));
       });
       const sections = [
-        { id: "graph", name: "全部活动路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => div().flex().justify_center().child(graph) },
+        { id: "graph", name: "全部活动路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => div().flex().justify_center().child(graph()) },
         { id: "quotas", name: "来源额度", extra: () => div().id("quota-manage").cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.editQuotas = !this.editQuotas; next.notify(); }).child(this.editQuotas ? "完成" : "隐藏 / 显示"),
           view: () => div().id("provider-quota-list").w_full().child(this.providerQuotas(t)) },
         { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageOverview(t) },
@@ -637,11 +687,11 @@ export default class MagpieLive extends View {
               .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).font_semibold().child(sessionId ? `${session?.agent || focusedType || "Agent"} · ${sessionId.slice(-8)}` : "尚无会话"))
               .child(text(currentSession ? "当前会话" : "最近会话", currentSession ? t.accent : t.dim, 9)))
             .child(text(currentSession ? "当前会话暂无进行中的请求" : "无法识别当前会话", t.dim, 10))
-            .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} · ${sessionMetrics}`, t.muted, 10))))
-          .children(activeRows) },
+            .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} · ${sessionMetrics()}`, t.muted, 10))))
+          .children(activeRows()) },
         { id: "requests", name: `最近请求 · ${requests.length}`, extra: () => div().id("route-mask").text_size(10).text_color(t.muted).cursor_pointer()
           .on_click((_e, next) => { this.maskAccounts = !this.maskAccounts; localStorage.setItem("magpie-live.mask", String(this.maskAccounts)); next.notify(); }).child(this.maskAccounts ? "账号已隐藏" : "隐藏账号"),
-          view: () => v_flex().gap(6).children(rows).when(!requests.length, body => body.child(text("等待请求", t.dim, 11))) },
+          view: () => v_flex().gap(6).children(rows()).when(!requests.length, body => body.child(text("等待请求", t.dim, 11))) },
       ];
       const ids = sections.map((section) => section.id);
       const order = [...new Set(this.overviewOrder.filter((id) => ids.includes(id))), ...ids.filter((id) => !this.overviewOrder.includes(id))];
@@ -746,6 +796,6 @@ export default class MagpieLive extends View {
         .children(this.quotaCards(t))))
       .child(h_flex().justify_between().px(10).py(7).border_t(1).border_color(t.border)
         .child(text("本机只读 · 不修改路由配置", t.dim, 9))
-        .child(text(this.readAt ? `上次成功读取 · ${new Date(this.readAt).toLocaleTimeString()}` : "等待首次读取", t.dim, 9)));
+        .child(this.readStatus));
   }
 }

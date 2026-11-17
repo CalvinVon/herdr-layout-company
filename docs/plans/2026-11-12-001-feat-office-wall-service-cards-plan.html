@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Herdr 项目办公室服务信息墙 · 方案导览</title>
+<style>
+:root{color-scheme:light;--paper:#f5f5f5;--ink:#2d3142;--muted:#4f5d75;--accent:#bf4520;--line:#bfc0c0}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.7 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}main{max-width:1000px;margin:auto;padding:52px 28px 72px}header{border-bottom:1px solid var(--line);padding-bottom:26px}.eyebrow{font-size:13px;color:var(--accent);font-weight:700;letter-spacing:.08em}h1{font-size:clamp(30px,5vw,46px);line-height:1.2;margin:10px 0 14px}h2{font-size:22px;margin:38px 0 10px}h3{font-size:17px;margin:22px 0 4px}p{max-width:78ch;margin:8px 0}a{color:#2e5aa8}section{border-bottom:1px solid var(--line);padding-bottom:24px}ul,ol{padding-left:1.4em}li{margin:5px 0}.muted{color:var(--muted)}.notice{border-left:3px solid var(--accent);padding:3px 16px;margin:18px 0}.diagram{width:100%;height:auto;display:block;margin:20px 0}footer{margin-top:28px;font-size:14px;color:var(--muted)}code{font-family:ui-monospace,monospace;font-size:.92em} @media(max-width:600px){main{padding:30px 18px 50px}}
+</style>
+</head>
+<body><main>
+<header><div class="eyebrow">方案草稿 · 2026-11-12</div><h1>让服务信息留在办公室墙上</h1><p>本机项目办公室自动展示服务地址与原始二维码，保留服务停止状态；固定链接与原码可在重启后恢复。</p><p><a href="2026-11-12-001-feat-office-wall-service-cards-plan.md">阅读完整技术方案</a></p></header>
+<section><h2>预期数据流</h2><p class="muted">下图表示拟实施的路径。观察进程的长期运行、原码提取和恢复边界仍需验证。</p>
+<svg class="diagram" viewBox="0 0 900 250" role="img" aria-labelledby="wall-flow-title wall-flow-desc" xmlns="http://www.w3.org/2000/svg">
+<title id="wall-flow-title">服务输出到办公室墙面的预期路径</title><desc id="wall-flow-desc">本机服务终端经只读观察和项目归属判断，形成服务卡；卡片展示在办公室墙及详情中，用户固定后写入本机存储。断流或身份不明标为未知。</desc>
+<defs><marker id="wall-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#4f5d75"/></marker></defs>
+<rect x="12" y="24" width="190" height="74" rx="6" fill="#ffffff" stroke="#4f5d75"/><text x="107" y="54" text-anchor="middle" font-size="16" fill="#2d3142">本机服务终端</text><text x="107" y="79" text-anchor="middle" font-size="13" fill="#4f5d75">现有和新启动的 pane</text>
+<rect x="240" y="24" width="190" height="74" rx="6" fill="#ffffff" stroke="#4f5d75"/><text x="335" y="54" text-anchor="middle" font-size="16" fill="#2d3142">只读观察</text><text x="335" y="79" text-anchor="middle" font-size="13" fill="#4f5d75">历史补读 + 增量</text>
+<rect x="468" y="24" width="190" height="74" rx="6" fill="#fff8f5" stroke="#bf4520"/><text x="563" y="54" text-anchor="middle" font-size="16" fill="#2d3142">项目服务卡</text><text x="563" y="79" text-anchor="middle" font-size="13" fill="#4f5d75">地址、原码、状态</text>
+<rect x="696" y="24" width="190" height="74" rx="6" fill="#ffffff" stroke="#4f5d75"/><text x="791" y="54" text-anchor="middle" font-size="16" fill="#2d3142">墙面与详情</text><text x="791" y="79" text-anchor="middle" font-size="13" fill="#4f5d75">查看、复制、扫码</text>
+<line x1="202" y1="61" x2="232" y2="61" stroke="#4f5d75" stroke-width="2" marker-end="url(#wall-arrow)"/><line x1="430" y1="61" x2="460" y2="61" stroke="#4f5d75" stroke-width="2" marker-end="url(#wall-arrow)"/><line x1="658" y1="61" x2="688" y2="61" stroke="#4f5d75" stroke-width="2" marker-end="url(#wall-arrow)"/>
+<rect x="468" y="160" width="190" height="62" rx="6" fill="#ffffff" stroke="#4f5d75"/><text x="563" y="188" text-anchor="middle" font-size="16" fill="#2d3142">本机固定存储</text><text x="563" y="208" text-anchor="middle" font-size="13" fill="#4f5d75">按项目隔离</text><line x1="563" y1="98" x2="563" y2="151" stroke="#4f5d75" stroke-width="2" marker-end="url(#wall-arrow)"/><text x="576" y="133" font-size="13" fill="#4f5d75">用户固定</text>
+</svg>
+<div class="notice"><strong>原码优先：</strong>终端二维码可能与旁边的 URL 不同。无法可靠恢复时显示提取失败并提供原终端入口，不能生成一个猜测的替源码。</div></section>
+<section><h2>交互与状态</h2><ul><li><strong>服务卡：</strong>服务输出更新时更新地址；有可信退出证据时标记停止，身份不确定或连接中断时标记未知。</li><li><strong>固定链接：</strong>可以手动添加、编辑、移除；本机重启后恢复，按已有项目房间隔离。</li><li><strong>墙面：</strong>紧凑展示数量和状态；打开原生详情后查看足够大的二维码、复制地址或定位终端。</li><li><strong>地址选择：</strong>Local 与 Network 分别显示；手机扫描不保证网络地址可达，localhost 指向扫码设备自身。</li></ul></section>
+<section><h2>实施顺序</h2><ol><li><strong>U1 · 观察与身份：</strong>发现未标记的本机服务终端，读取历史并观察增量，处理退出、重连、切房间和未知状态。</li><li><strong>U2 · 二维码与界面：</strong>在墙面加入入口和原生详情，保真提取原码；展示、复制、打开与扫描。</li><li><strong>U3 · 固定与存储：</strong>按房间保存固定内容和手动链接，处理写入失败、冲突及重启恢复。</li></ol></section>
+<section><h2>已经验证与仍需验证</h2><h3>规划期证据</h3><ul><li>实际服务终端可读取到 Local 和 Network 地址；现有终端未带统一服务标签。</li><li>受控探针的 URL 和文本二维码块字符可从历史读取；只读观察能接收后续输出。</li><li>服务退出后 shell 可以继续存活，且前台程序变化时 PID 可能不变，因此不能只看终端状态或 PID。</li></ul><h3>实施验收</h3><ul><li>在真实 Herdr 验证现有服务自动发现、房间隔离、停止与未知状态、热重载/断流恢复，以及观察者不输入、不调整尺寸。</li><li>用真实 DRN 输出验证原码提取；用不同于相邻 URL 的载荷做对照，并通过手机扫描核对实际内容。</li><li>验证窄窗口和多卡片布局、重启后本机存储恢复，以及损坏/冲突时的数据保护。</li></ul><p>原截图二维码的解码尝试未成功；不能由此推断原码无法提取。扫描、跨设备网络可达性和其他系统行为均未验证。</p></section>
+<footer>此页面是方案导览；范围、完整验收场景与风险以同目录 Markdown 方案为准。当前没有实施业务代码。</footer>
+</main></body></html>
