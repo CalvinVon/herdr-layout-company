@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const timeSource = fs.readFileSync(path.join(__dirname, 'session-time.js'), 'utf8');
-const { sessionTime, staleSession } = new Function(timeSource.replace(/^export /gm, '') + '\nreturn {sessionTime, staleSession};')();
+const { sessionTime, staleSession, projectActive, toggleProjects } = new Function(timeSource.replace(/^export /gm, '') + '\nreturn {sessionTime, staleSession, projectActive, toggleProjects};')();
 const now = new Date(2026, 10, 11, 12).getTime();
 assert.equal(sessionTime(new Date(2026, 10, 11, 9, 5).getTime(), now), '今天 09:05');
 assert.equal(sessionTime(new Date(2026, 10, 10, 8, 6).getTime(), now), '昨天 08:06');
@@ -14,6 +14,29 @@ assert.equal(sessionTime(new Date(2025, 11, 31, 23, 5).getTime(), new Date(2026,
 assert.equal(staleSession(now - 2 * 86400000, now), false);
 assert.equal(staleSession(now - 2 * 86400000 - 1, now), true);
 assert.equal(staleSession(null, now), false);
+const project = { tabs: [{ id: 'activity' }] };
+const members = [{ pane: 'p', tab: 'activity', terminal: 't' }];
+const state = new Map([['p', 'working']]);
+const statuses = new Map([['t', { status_ms: now - 86400001 }]]);
+const noCore = () => null;
+assert.equal(projectActive(project, members, state, statuses, noCore, now), true, 'working remains emphasized regardless of age');
+state.set('p', 'done');
+assert.equal(projectActive(project, members, state, statuses, noCore, now), false, 'old completion is not emphasized');
+statuses.get('t').status_ms = now - 86400000;
+assert.equal(projectActive(project, members, state, statuses, noCore, now), true, 'completion within one day is emphasized');
+state.set('p', 'idle');
+assert.equal(projectActive(project, members, state, statuses, noCore, now), true, 'recent idle is emphasized');
+statuses.get('t').status_ms = 0;
+assert.equal(projectActive(project, members, state, statuses, noCore, now), false, 'missing timestamp is not recent');
+project.tabs[0].changed_at = now - 60000;
+assert.equal(projectActive(project, members, state, statuses, noCore, now), true, 'recent tab activity substitutes for an unavailable session timestamp');
+state.delete('p');
+members[0].program = { agent: true };
+assert.equal(projectActive(project, members, state, statuses, noCore, now), true, 'recent agent tab stays active when pane status is unavailable');
+project.tabs[0].changed_at = now - 86400001;
+assert.equal(projectActive(project, members, state, statuses, noCore, now), false, 'old tab activity does not emphasize the project');
+assert.deepEqual(toggleProjects([{ id: 'a' }, { id: 'b' }], { a: true, split: true }), { a: true, b: true, split: true });
+assert.deepEqual(toggleProjects([{ id: 'a' }, { id: 'b' }], { a: true, b: true, split: true }), { a: false, b: false, split: true });
 const titleSource = fs.readFileSync(path.join(__dirname, 'tab-title.js'), 'utf8');
 const { tabTitle } = new Function(titleSource.replace(/^export /gm, '') + '\nreturn {tabTitle};')();
 const titleTab = { id: 'session', name: '1', named: false };
@@ -32,13 +55,19 @@ const homeRules = new Function(homeSource.replace(/^export /gm, '') + '\nreturn 
 const rules = new Function(...Object.keys(homeRules), rulesSource.replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\nreturn {normalizePath,projectKey,parseWorktrees,resolveProject,bindingFor,primarySpace,worktreeFor,rememberWorktrees,launchProject,mergeBindings,consumeProjectRequest,homeTab,sessionTabs,retainSpace};')(...Object.values(homeRules));
 const source = fs.readFileSync(path.join(__dirname, 'path-groups.js'), 'utf8');
 /** @type {typeof import('./path-groups.js')} */
-const { groupPaths } = new Function(...Object.keys(rules), source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\nreturn {groupPaths};')(...Object.values(rules));
+const { groupPaths, parentAgent } = new Function(...Object.keys(rules), source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\nreturn {groupPaths,parentAgent};')(...Object.values(rules));
 /** @param {string} id @param {number} [changed_at] @returns {any} */
 const tab = (id, changed_at = 0) => ({ id, changed_at, settled: false });
 /** @param {string} id @param {any[]} tabs @param {string|null} [machine] @returns {any} */
 const space = (id, tabs, machine = null) => ({ id, folder: '/repo', name: id, named: false, machine, tabs, active: false });
 /** @param {string} id @param {string} tab @param {string} [cwd] @returns {any} */
 const pane = (id, tab, cwd = '/repo') => ({ pane: id, terminal: id, tab, cwd });
+const hierarchy = [pane('lead', 'split'), pane('child1', 'split'), pane('child2', 'split'), pane('shell', 'split')];
+const hierarchyRaw = new Map([['lead', {}], ['child1', { parent: 'lead' }], ['child2', { parent: 'lead' }], ['shell', {}]]);
+const hierarchyStates = new Map([['lead', 'working'], ['child1', 'idle'], ['child2', 'done']]);
+assert.equal(parentAgent(hierarchy, hierarchyRaw, hierarchyStates), hierarchy[0], 'ordinary terminals do not hide the agent parent');
+hierarchyRaw.get('child2').parent = 'another';
+assert.equal(parentAgent(hierarchy, hierarchyRaw, hierarchyStates), null, 'unrelated agents remain separate');
 const spaces = [space('a', [tab('a', 100), tab('split', 200)]), space('b', [tab('b', 300)]), space('remote', [tab('remote', 400)], 'server')];
 const panes = [pane('a', 'a'), pane('split-main', 'split'), pane('split-feature', 'split', '/worktrees/feature'), pane('b', 'b'), pane('remote', 'remote')];
 const trees = [{ path: '/repo', branch: 'main', name: 'main' }, { path: '/worktrees/feature', branch: 'feature', name: 'feature' }];
@@ -85,8 +114,12 @@ for (const mod of ['agent-columns', 'agent-columns-spaces']) {
   const helper = fs.readFileSync(path.join(__dirname, '..', mod, 'sidebar-collapse.js'), 'utf8');
   let tree = { id: 'root', children: [{ id: 'spaces', size: { weight: 1.5 }, min: 38 }, { id: 'agents', size: { px: 420 }, min: 40 }] };
   const saved = new Map([['layout', 'office']]);
+  const zoomCalls = [];
+  const activeSpaces = [{ active: true, tabs: [{ id: 'current', active: true }] }];
+  const zoomPanes = [{ pane: 'p1', terminal: 't1', tab: 'current', zoomed: true }, { pane: 'p2', terminal: 't2', tab: 'other', zoomed: true }];
   /** @param {string} command @param {{id: string, px?: number, weight?: number}} args */
   const dispatch = (command, args) => {
+    if (command === 'pane.zoom') { zoomCalls.push(args.pane); return; }
     assert.equal(command, 'layout.resize');
     const block = tree.children.find(child => child.id === args.id);
     block.size = args.px !== undefined ? { px: args.px } : { weight: args.weight };
@@ -95,9 +128,23 @@ for (const mod of ['agent-columns', 'agent-columns-spaces']) {
   const get = key => saved.get(key);
   /** @param {string} key @param {any} value */
   const set = (key, value) => saved.set(key, JSON.parse(JSON.stringify(value)));
-  const { toggleBlock, blockCollapsed } = new Function('layout', 'run', 'shared', 'setShared', helper.replace(/^import .*;\n/gm, '').replace(/export /g, '') + '\nreturn { toggleBlock, blockCollapsed };')(
-    () => tree, dispatch, get, set,
+  const { toggleBlock, blockCollapsed, restoreZoom, maximizePane } = new Function('layout', 'run', 'shared', 'setShared', 'spaces', 'panes', helper.replace(/^import .*;\n/gm, '').replace(/export /g, '') + '\nreturn { toggleBlock, blockCollapsed, restoreZoom, maximizePane };')(
+    () => tree, dispatch, get, set, () => activeSpaces, () => zoomPanes,
   );
+  restoreZoom('current', 'p1', 't1');
+  assert.deepEqual(zoomCalls, [], 'selecting the same agent keeps zoom');
+  restoreZoom('current', 'p3', 't3');
+  restoreZoom('other', 'p2', 't2');
+  assert.deepEqual(zoomCalls, ['p1', 'p1'], 'switching agents restores only the visible tab');
+  zoomPanes[0].zoomed = false;
+  restoreZoom('other', 'p2', 't2');
+  assert.equal(zoomCalls.length, 2, 'unzoomed navigation does not toggle zoom');
+  maximizePane('p1');
+  assert.deepEqual(zoomCalls, ['p1', 'p1', 'p1'], 'double click maximizes an unzoomed pane');
+  zoomPanes[0].zoomed = true;
+  maximizePane('p1');
+  maximizePane('missing');
+  assert.equal(zoomCalls.length, 3, 'already zoomed or missing panes are not toggled');
   const before = structuredClone(tree);
   toggleBlock('spaces');
   assert.equal(blockCollapsed('spaces'), true);

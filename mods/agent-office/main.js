@@ -7,7 +7,7 @@
 // dark, the windows show the real weather, and the office decorates for the season.
 // Hover anyone to see what they're working on; click them to go to their terminal.
 import { View, div, svg, PathBuilder } from "gpui-kit";
-import { Scrollbar } from "gpui-base";
+import { Scrollbar, VirtualListScrollHandle, v_virtual_list } from "gpui-base";
 import { agents, terminals, spaces, panes, shared, setShared, focused, run, exec, appHome, readTextFile, writeTextFile, openOverlay, machines, window, settings } from "herdr";
 import * as A from "./art.js";
 import * as D from "./decor.js";
@@ -101,6 +101,7 @@ function wallQR(matrix, unit, id) {
 export default class Office extends View {
   init(_props, cx) {
     this.size = { width: 1400, height: 250 };
+    this.todoScroll = VirtualListScrollHandle.new();
     this.plateWidths = {};
     Object.assign(this, roomState());
     this.projectSelection = new ProjectSelection();
@@ -279,6 +280,12 @@ export default class Office extends View {
         if (this.wallGoal && this.wallDismissed[`${this.wallGoal.roomKey}:${this.wallGoal.card.id}`] === this.wallGoal.card.text) this.wallGoal = null;
         this.wallExtras = Object.fromEntries(Object.entries(this.wallPublications).map(([room, cards]) => [room, [...cards]]));
         if (this.wallGoal) (this.wallExtras[this.wallGoal.roomKey] ??= []).push(this.wallGoal.card);
+        const todo = this.wallGoal?.card.tasks ?? [];
+        const todoState = JSON.stringify([this.wallGoal?.card.id, todo]);
+        if (todoState !== this.todoState) {
+          this.todoState = todoState;
+          if (todo.length) this.todoScroll.scroll_to_item(S.todoAnchor(todo), "top");
+        }
         const roomKeys = new Set([...Object.keys(this.wallCards), ...Object.keys(this.wallExtras)]);
         const visible = Object.fromEntries([...roomKeys].map(room => [room, S.orderWallCards([...Object.values(this.wallCards[room] ?? {}).map(({ signature, complete, ...card }) => card), ...(this.wallExtras[room] ?? [])])]));
         this.wallError = results.some(item => item.error) || this.wallPublicationError ? "部分内容读取失败" : null;
@@ -592,13 +599,17 @@ export default class Office extends View {
               .on_click((_event, cx) => cx.stop_propagation())
               .on_scroll_wheel((_event, cx) => cx.stop_propagation())
               .child(div().size_full().p(4).bg("#263f3b").relative()
-                .child(div().id("office-todo-scroll").size_full().pr(8).overflow_y_scroll().flex().flex_col().gap(3)
-                  .when(!tasks.length, el => el.child(div().text_size(8).text_color("#aabeb0").child("暂无 TODO")))
-                  .children(tasks.map((task, index) => div().id(`office-todo-${index}`).flex_none().flex().gap(4).p(3).bg("#35534b")
-                    .child(div().size(4).mt(2).flex_none().bg(task.status === "done" ? "#92b392" : task.status === "in_progress" ? "#efc36d" : "#c77d6a"))
-                    .child(div().flex_1().min_w(0).text_size(8).whitespace_normal().text_color(task.status === "done" ? "#a9b7a8" : "#f2ebd5")
-                      .child(`${task.status === "done" ? "✓" : task.status === "in_progress" ? "▶" : "○"} ${task.text}`)))))
-                .child(Scrollbar.vertical("office-todo-scroll").mode("always").absolute().inset_0()))))
+                .when(!tasks.length, el => el.child(div().text_size(8).text_color("#aabeb0").child("暂无 TODO")))
+                .when(Boolean(tasks.length), el => el.child(v_virtual_list("office-todo-scroll", tasks.length,
+                  // shortcut: conservative row-height estimate, use measured scrolling when the host exposes it.
+                  tasks.map(task => 8 + String(task.text).split("\n").reduce((lines, line) => lines + Math.max(1, Math.ceil(Array.from(line).length / 21)), 0) * 11),
+                  index => String(index), range => tasks.slice(range.start, range.end).map((task, offset) =>
+                    div().id(`office-todo-${range.start + offset}`).w_full().flex().gap(5).p(3).bg("#35534b")
+                      .child(div().size(7).mt(2).flex_none().rounded_full().border_1().border_color("#d5dfd4").when(task.status === "done", el => el.bg("#d5dfd4")))
+                      .child(div().flex_1().min_w(0).text_size(8).whitespace_normal().text_color(task.status === "done" ? "#a9b7a8" : "#f2ebd5")
+                        .child(task.text))))
+                  .size_full().pr(8).track_scroll(this.todoScroll)))
+                .when(Boolean(tasks.length), el => el.child(Scrollbar.vertical("office-todo-scroll").mode("always").absolute().inset_0())))))
           .children(wallCards.map((card, index) => {
             const matrix = Array.isArray(card?.qr) && card.qr.length >= 21 && card.qr.length <= 177 && card.qr.every(row => Array.isArray(row) && row.length === card.qr.length) ? card.qr : null;
             const unit = matrix ? Math.floor((boardHeight - 20) / (matrix.length + 8)) : 0;
@@ -641,6 +652,11 @@ export default class Office extends View {
   prop(art, x, g, lift = 0) {
     return div().absolute().left(x).top(g.floorY - A.BOX * g.P - lift).w(art.width * g.P).h(A.BOX * g.P).children(A.rects(art.rects, A.PALETTE));
   }
+  focusEmployee(agent, event) {
+    run("pane.focus", { pane: agent.pane });
+    if (event.click_count === 2 && panes().some(pane => pane.pane === agent.pane && !pane.zoomed)) run("pane.zoom", { pane: agent.pane });
+  }
+
 
   // A desk with its chair, monitor, bell and lamp, the branch on a sticky note, and the
   // nameplate of whoever sits there.
@@ -655,7 +671,7 @@ export default class Office extends View {
     const overtime = st === "working" && tab?.working_since && Date.now() - tab.working_since > MUGS_AFTER;
     const plate = a ? this.plate(a) : null;
     return div().id(`desk-${i}`).absolute().left(pos.x).top(pos.y - A.BOX * P).w(A.SLOT * P).h(A.BOX * P + 28)
-      .when(Boolean(a), (el) => el.cursor_pointer().on_click(() => run("pane.focus", { pane: a.pane })))
+      .when(Boolean(a), (el) => el.cursor_pointer().on_click(event => this.focusEmployee(a, event)))
       .children([
         ...A.rects(A.DESK.chair, pal), ...A.rects(A.DESK.desk, pal),
         ...(overtime ? A.rects(A.MUG_PILE, pal) : []),
@@ -874,7 +890,7 @@ export default class Office extends View {
     return div().id(`person-${a.address}`).absolute().left(at.x).top(at.y - A.BOX * P).w(A.PERSON * P).h(A.BOX * P)
       .transition("left", { duration: at.dur, easing: "ease-in-out" })
       .transition("top", { duration: at.dur, easing: "ease-in-out" })
-      .cursor_pointer().on_click(() => run("pane.focus", { pane: a.pane }))
+      .cursor_pointer().on_click(event => this.focusEmployee(a, event))
       .on_hover((h, cx) => {
         if (h) this.hovered = a.address;
         else if (this.hovered === a.address) this.hovered = null;

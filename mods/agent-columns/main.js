@@ -1,7 +1,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input } from "gpui-base";
 import { theme, window, terminals, agents as reportedAgents, spaces, panes, focused, props, run, setAgentOrder, layout, shared, setShared, openOverlay, exec, home, nextCommand } from "herdr";
-import { blockCollapsed, toggleBlock } from "./sidebar-collapse.js";
+import { blockCollapsed, toggleBlock, restoreZoom, maximizePane } from "./sidebar-collapse.js";
 
 const titleWorking = (title) => /^[◐◓◑◒✳✻✽✶✷✸✹✺]/u.test((title ?? "").trim());
 const duration = (ms) => {
@@ -169,7 +169,7 @@ export default class Board extends View {
       ? `${approximate ? "~" : ""}${duration(Date.now() - since)}` : unreadDone ? "已完成 · 待查看" : state.label;
     return h_flex().id(`agent-${a.address}`).w_full().h(60).flex_none().rounded(7).overflow_hidden()
       .bg(active ? theme().selected : unreadDone ? theme().done + "18" : theme().chrome).cursor_pointer().hover(s => s.bg(theme().hover))
-      .on_click(() => run("agent.focus", { terminal: a.address }))
+      .on_click(event => { restoreZoom(a.tab, a.pane, a.address); run("agent.focus", { terminal: a.address }); if (event.click_count === 2) maximizePane(a.pane); })
       .child(v_flex().flex_1().min_w(0).px(10).py(7).gap(4)
         .child(h_flex().items_center().gap(6)
           .child(icon(a.program, 14).tooltip(`${a.program?.name ?? "Agent"} · ${a.address}${me?.parent ? ` · sub-agent of ${parent?.tab_name ?? me.parent}` : ""}`))

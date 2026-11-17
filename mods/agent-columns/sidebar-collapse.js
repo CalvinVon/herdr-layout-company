@@ -1,4 +1,4 @@
-import { layout, run, shared, setShared } from "herdr";
+import { layout, run, shared, setShared, spaces, panes } from "herdr";
 
 /** @param {any} tree @param {string} id @returns {any} */
 const find = (tree, id) => tree?.id === id ? tree : (tree?.children ?? []).map((/** @type {any} */ child) => find(child, id)).find(Boolean);
@@ -21,4 +21,14 @@ export function toggleBlock(id) {
     setShared(collapsedKey(id), true);
     run("layout.resize", { id, px: id === "agents" ? 40 : 38 });
   }
+}
+
+export function restoreZoom(tab, pane, terminal) {
+  const activeTab = spaces().find(space => space.active)?.tabs.find(item => item.active)?.id;
+  const zoomed = panes().find(item => item.tab === activeTab && item.zoomed);
+  if (zoomed && (tab !== zoomed.tab || (pane && pane !== zoomed.pane) || (terminal && terminal !== zoomed.terminal))) run("pane.zoom", { pane: zoomed.pane });
+}
+
+export function maximizePane(pane) {
+  if (pane && panes().some(item => item.pane === pane && !item.zoomed)) run("pane.zoom", { pane });
 }

@@ -87,7 +87,7 @@ export default class Pane extends View {
     if (!p || p.mod === "space-home") return div();
     const title = (p.title || "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
     const agentName = p.program?.agent && p.program.name;
-    const name = title && agentName && title !== agentName ? `${title} (${agentName})` : title || agentName || p.program?.name || "shell";
+    const name = title || agentName || p.program?.name || "shell";
     const pic = icon(p.program, 14, t.dim);
     const st = p.status;
     const all = terminals();
@@ -107,13 +107,14 @@ export default class Pane extends View {
       .border_color(t.border)
       .text_size(12)
       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
-      .on_click(() => run("pane.focus", { pane }))
+      .on_click(event => { run("pane.focus", { pane }); if (event.click_count === 2) run("pane.zoom", { pane }); })
       .when(Boolean(pic) || st === "working" || st === "done", el => el.child(div().size(18).flex_none().relative().when(Boolean(pic), icon => icon.child(pic))
         .when(st === "working" || st === "done", icon => icon.child(div().id(`pane-status-${pane}`).absolute().right(0).top(11).size(6).rounded(3)
           .bg(st === "working" ? t.working : t.done).when(st === "working", dot => dot.loop("top", { from: 9, to: 13, period: 1000 }))))))
       .when(Boolean(terminal && isAgent), el => el.child(div().size(20).flex_none().flex().items_center().justify_center()
         .tooltip(terminal.parent ? `子 Agent · 父级：${parent?.title || terminal.parent} (${terminal.parent})` : `主 Agent · ${terminal.address}`)
         .child(svg(`mods/agent-columns-spaces/agent-chat-${terminal.parent ? "worker" : "lead"}.svg`).size(14).text_color(terminal.parent ? t.muted : t.accent))))
+      .when(Boolean(isAgent && p.terminal), el => el.child(div().flex_none().text_color(t.working).tooltip("Herdr 终端 ID").child(p.terminal)))
       .child(div().flex_none().truncate().max_w(360).font_medium().text_color(t.foreground).tooltip(name).child(name))
       .child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd)))
       .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))

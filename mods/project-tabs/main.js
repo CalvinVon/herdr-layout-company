@@ -1,4 +1,4 @@
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { spaces, panes, terminals, machines, focused, hc, appHome, readTextFile, writeTextFile, run, openOverlay, closeOverlay, theme, window, shared, setShared, nextCommand, notify, layout, settings } from "herdr";
 import { moveTerminal } from "./move-terminal.js";
@@ -170,6 +170,8 @@ export default class Tabs extends View {
       const mine = all.filter(p => p.tab === c.id);
       const lead = mine.find(p => p.terminal && mine.some(child => raw.get(child.terminal)?.parent === p.terminal));
       const worker = !lead && mine.find(p => raw.get(p.terminal)?.parent);
+      const agentPane = lead ?? mine.find(p => p.focused && p.program?.agent) ?? mine.find(p => p.program?.agent);
+      const program = agentPane?.program;
       const name = labels[c.id]?.name ?? c.name;
       const status = labels[c.id]?.status ?? c.status;
       return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
@@ -187,6 +189,8 @@ export default class Tabs extends View {
         .when(Boolean(worker), el => el.child(svg("mods/agent-columns-spaces/agent-chat-worker.svg").size(15).flex_none().text_color(t.muted)))
         .when(!lead && !worker && mine.length > 1, el => el.child(svg("mods/workspace-chrome/layers.svg").size(13).flex_none().text_color(t.muted)))
         .when(!lead && !worker && mine.length <= 1, el => el.child(div().size(7).rounded_full().flex_none().bg(t[status] ?? t.dim)))
+        .when(Boolean(program?.icon), el => el.child((program.key === "omp" ? svg("mods/magpie-live/omp.svg").text_color(t.muted) : program.tint ? svg(program.icon).text_color(t.muted) : image(program.icon)).size(14).flex_none()))
+        .when(Boolean(program?.agent && agentPane?.terminal), el => el.child(div().flex_none().text_size(10).text_color(t.working).child(agentPane.terminal)))
         .child(div().max_w(280).truncate().child(c.zoomed ? `${name} Z` : name))
         .when(mine.length > 1, el => el.child(div().px(5).py(2).rounded(4).bg(t.raised).text_size(10).text_color(t.muted).tooltip(`${mine.length} 个分屏`).child(String(mine.length))))
         .when(status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
@@ -224,6 +228,7 @@ export default class Tabs extends View {
             ? { id: "floating-editor", type: "block", content: floatingContent }
             : find(root, "files");
         if (floating.panel === "files" && content) content = { ...content, content: { ...content.content, props: { ...content.content.props, floating: true } } };
+        if (floating.panel === "changes" && !floating.history && content) content = { ...content, content: { ...content.content, mod: "project-floating-changes" } };
         if (content) {
           const header = { id: "floating-header", type: "block", size: { px: 34 }, content: { mod: "project-panel-window", props: { panel: floating.panel, history: Boolean(floating.history) } } };
           const id = openOverlay({ kind: "window", width: 0.7, height: 0.8, layout: { id: "floating-panel", type: "column", children: [header, content] } });

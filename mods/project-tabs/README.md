@@ -1,6 +1,8 @@
 # Move an Agent split
 
 In Office and Agent Columns, the tab bar accepts `project-tabs.new-space`, `project-tabs.new-tab`, `project-tabs.split-right`, and `project-tabs.split-down` key actions. Bind them in Herdr's `keys.json` to open the Space, session, and focused-terminal split menus.
+Floating Files, Changes, History and Editor panels move when dragged by their title bar; their content remains available for normal interaction.
+
 
 In the Office or Agent Columns layout, hover an Agent split header and click the arrow leaving a square. Choose a new tab, or choose an existing tab in the same Space and select a right or down split. The destination list scrolls and includes only other tabs with a live terminal pane. The same running terminal is moved; only split tabs offer the action, and one move at a time is accepted. A new tab uses the moved Agent's session title. Existing destination tab names are preserved.
 

@@ -105,6 +105,13 @@ export function activeSessionGoal(groups, agents, focus) {
 export function orderWallCards(cards) {
   return [...cards].sort((a, b) => (a.kind === 'goal' ? 0 : 1) - (b.kind === 'goal' ? 0 : 1));
 }
+export function todoAnchor(tasks) {
+  const next = tasks.findIndex(task => task.status !== 'done');
+  if (next < 0) return Math.max(0, tasks.length - 1);
+  for (let index = next - 1; index >= 0; index--) if (tasks[index].status === 'done') return index;
+  return next;
+}
+
 
 export function parseWallPins(text) {
   const data = text === null ? { version: 1, rooms: {} } : JSON.parse(text);

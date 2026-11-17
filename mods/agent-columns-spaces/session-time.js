@@ -14,3 +14,20 @@ export function sessionTime(timestamp, now = Date.now()) {
 }
 
 export const staleSession = (timestamp, now = Date.now()) => Number.isFinite(timestamp) && timestamp > 0 && now - timestamp > 2 * 86400000;
+
+export function projectActive(space, panes, states, raw, coreState, now) {
+  return space.tabs.some(tab => {
+    const members = panes.filter(pane => pane.tab === tab.id);
+    const recent = timestamp => Number.isFinite(timestamp) && timestamp > 0 && now - timestamp <= 86400000;
+    if (members.some(pane => {
+      const status = states.get(pane.pane);
+      return status === "working" || (["done", "idle"].includes(status) && recent(raw.get(pane.terminal)?.status_ms || coreState(pane.terminal)?.since || tab.changed_at));
+    })) return true;
+    return !members.some(pane => states.get(pane.pane)) && (tab.status === "working" || (recent(tab.changed_at) && (["done", "idle"].includes(tab.status) || members.some(pane => pane.program?.agent || pane.app))));
+  });
+}
+
+export function toggleProjects(spaces, folded) {
+  const collapse = spaces.some(space => !folded[space.id]);
+  return { ...folded, ...Object.fromEntries(spaces.map(space => [space.id, collapse])) };
+}

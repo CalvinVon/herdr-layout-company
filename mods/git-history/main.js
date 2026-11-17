@@ -156,6 +156,7 @@ export default class GitHistory extends View {
     if (contextKey() !== this.context) this.refresh(cx);
     const selected = this.commits.find(commit => commit.hash === this.selected);
     return v_flex().size_full().min_h(0).bg(t.surface).text_color(t.foreground)
+      .when(Boolean(props()?.overlay), el => el.on_mouse_down("left", (_event, cx) => cx.stop_propagation()))
       .child(h_flex().h(36).flex_none().px(10).gap(6).items_center().border_b(1).border_color(t.border)
         .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.accent).child(`⑂ ${this.branch || "Git history"}`))
         .child(div().text_size(10).text_color(t.muted).child(`${this.commits.length} commits`))

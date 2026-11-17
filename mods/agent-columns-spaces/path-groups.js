@@ -15,6 +15,12 @@ const roleRank = (pane, raw) => {
   if (terminal.parent) return 1;
   return pane.program?.agent || pane.status || pane.app ? 0 : 2;
 };
+export function parentAgent(members, raw, states) {
+  const agents = members.filter(pane => pane.terminal && (pane.program?.agent || states.get(pane.pane)));
+  return agents.find(pane => agents.some(child => raw.get(child.terminal)?.parent === pane.terminal)
+    && agents.every(child => child === pane || raw.get(child.terminal)?.parent === pane.terminal)) ?? null;
+}
+
 
 /** @param {import('herdr').SpaceInfo[]} spaces @param {import('herdr').PaneInfo[]} panes @param {Record<string,import('./project-bindings.js').Binding>} bindings @param {Map<string,any>} raw */
 export function groupPaths(spaces, panes, bindings, raw) {

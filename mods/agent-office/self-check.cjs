@@ -30,7 +30,7 @@ function load(filename, env) {
   return new Function(...Object.keys(env), body + '\nreturn {' + names.map(name => `get ${name}(){return ${name};}`).join(',') + (main ? `${names.length ? ',' : ''}default:${main}` : '') + '};')(...Object.values(env));
 }
 const A = load('art.js', { div: element });
-const D = load('decor.js', { div: element, A, run() {} });
+const D = load('decor.js', { div: element, A, run() {}, panes: () => [] });
 const T = load('themes.js', { div: element, A, D });
 const model = load('projects.js', {});
 const S = load('wall-services.js', {});
@@ -57,14 +57,25 @@ const noRows = () => [];
 /** @type {Record<string, any>} */
 const sharedValues = {};
 const openedFiles = [];
+const paneCalls = [];
+let livePanes = [];
 let zoom = 1;
 globalThis.window = { paint_path: () => element(), is_window_active: () => true };
-const env = { ...model, View: class {}, div: element, svg: element, Scrollbar: { vertical: element }, PathBuilder: { fill: () => ({ add_polygon() {}, build: () => ({}) }) }, A, T, D, S, agents: () => agents, terminals: noRows, spaces: noRows, panes: noRows, machines: noRows,
+const env = { ...model, View: class {}, div: element, svg: element, Scrollbar: { vertical: element }, VirtualListScrollHandle: { new: () => ({ scroll_to_item() {} }) }, v_virtual_list: (id, count, sizes, key, render) => element().id(id).children(render({ start: 0, end: count })), PathBuilder: { fill: () => ({ add_polygon() {}, build: () => ({}) }) }, A, T, D, S, agents: () => agents, terminals: noRows, spaces: noRows, panes: () => livePanes, machines: noRows,
   focused: () => focus, shared: (/** @type {string} */ key) => key === 'workspace.office-groups' ? groups : sharedValues[key],
-  setShared(/** @type {string} */ key, /** @type {any} */ value) { sharedValues[key] = value; }, run() {}, openOverlay() {}, exec(command, args) { openedFiles.push({ command, args }); return Promise.resolve({ code: 0 }); }, window: () => ({ platform: 'macos' }), settings: () => ({ zoom }), hc() {}, writeTextFile() {} };
+  setShared(/** @type {string} */ key, /** @type {any} */ value) { sharedValues[key] = value; }, run(command, args) { paneCalls.push({ command, args }); }, openOverlay() {}, exec(command, args) { openedFiles.push({ command, args }); return Promise.resolve({ code: 0 }); }, window: () => ({ platform: 'macos' }), settings: () => ({ zoom }), hc() {}, writeTextFile() {} };
 const Office = load('main.js', env).default;
 const cx = { timer: { every() {}, after() {} }, notify() {}, spawn() {} };
 const office = new Office(); office.init({}, cx);
+livePanes = [{ pane: 'pane-a', zoomed: false }];
+office.focusEmployee(agents[0], { click_count: 1 });
+assert.deepEqual(paneCalls.splice(0), [{ command: 'pane.focus', args: { pane: 'pane-a' } }]);
+office.focusEmployee(agents[0], { click_count: 2 });
+assert.deepEqual(paneCalls.splice(0), [{ command: 'pane.focus', args: { pane: 'pane-a' } }, { command: 'pane.zoom', args: { pane: 'pane-a' } }]);
+livePanes[0].zoomed = true;
+office.focusEmployee(agents[0], { click_count: 2 });
+assert.deepEqual(paneCalls.splice(0), [{ command: 'pane.focus', args: { pane: 'pane-a' } }]);
+livePanes = [];
 Object.assign(office, {
   room: noRows, prop: element, person: element, interns: noRows, graduates: noRows, leavers: noRows, kitty: element,
   /** @param {string} address @param {string} spot @param {number} x @param {number} y */
@@ -197,6 +208,9 @@ const todoScroll = find(todoBoard, 'office-todo-scroll');
 const goalCard = find(extendedWall, 'office-wall-card-0');
 assert.ok(todoScroll && find(todoScroll, 'office-todo-0') && find(todoScroll, 'office-todo-1'));
 assert.ok(text(todoScroll).includes('检查二维码') && text(todoScroll).includes('验证长任务可以换行显示'));
+assert.equal(S.todoAnchor([{ status: 'done' }, { status: 'done' }, { status: 'in_progress' }, { status: 'pending' }]), 1);
+assert.equal(S.todoAnchor([{ status: 'pending' }]), 0);
+assert.equal(S.todoAnchor([{ status: 'done' }, { status: 'done' }]), 1);
 assert.ok(!text(goalCard).includes('检查二维码'));
 assert.ok(!text(extendedWall).includes('点击查看全部'));
 let scrollStopped = false;

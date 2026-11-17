@@ -1,7 +1,7 @@
 // The room's fixtures: wall pieces, the door, weather in the windows, seasonal touches.
 // Each function returns elements positioned in the scene's px.
 import { div } from "gpui-kit";
-import { run } from "herdr";
+import { panes, run } from "herdr";
 import * as A from "./art.js";
 
 const WOOD = "#7a5c3e";
@@ -106,7 +106,7 @@ export function videoWall(x, y, h, remotes) {
       .when(st === "working", (el) => el.loop("top", { from: -(A.BOX - 21) * p + 4, to: -(A.BOX - 21) * p + 2, period: 320 }));
     return div().id(`call-${r.address}`).w(tileSize).h(tileSize).relative().overflow_hidden().rounded(3).bg("#24425a")
       .border_2().border_color(ring[st] ?? ring.idle).cursor_pointer().tooltip(r.title)
-      .on_click(() => run("pane.focus", { pane: r.pane }))
+      .on_click(event => { run("pane.focus", { pane: r.pane }); if (event.click_count === 2 && panes().some(pane => pane.pane === r.pane && !pane.zoomed)) run("pane.zoom", { pane: r.pane }); })
       .child(face)
       .when(st === "working", (el) => el.child(div().absolute().left(0).top(0).size_full().bg("#7fb6ff").opacity(0.12)))
       .when(st === "idle", (el) => el.child(div().absolute().left(0).top(0).size_full().bg("#0b1030").opacity(0.5))

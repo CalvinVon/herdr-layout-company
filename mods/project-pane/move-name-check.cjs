@@ -18,14 +18,19 @@ const pane = { pane: 'p1', terminal: 't1', tab: 'tab1', title: '◐ π > 子 Age
 const terminal = { address: 't1', state: 'live' };
 const space = { id: 's1', active: true, tabs: [{ id: 'tab1', name: '父任务', named: true }] };
 let overlay;
+const calls = [];
 const Pane = new Function('View', 'div', 'svg', 'image', 'h_flex', 'v_flex', 'panes', 'terminals', 'spaces', 'props', 'run', 'openOverlay', 'closeOverlay', 'theme', 'home', 'shared', 'setShared', 'notify', `${source}\nreturn Pane;`)(
   class {}, element, element, element, element, element,
   () => [pane, { pane: 'p2', tab: 'tab1' }], () => [terminal], () => [space], () => ({ pane: 'p1' }),
-  () => {}, value => { overlay = value; }, () => {}, () => ({ dim: '#777777', muted: '#888888' }), () => '/home', () => null, () => {}, () => {},
+  (command, args) => calls.push({ command, args }), value => { overlay = value; }, () => {}, () => ({ dim: '#777777', muted: '#888888' }), () => '/home', () => null, () => {}, () => {},
 );
 const view = new Pane();
 view.hovered = true;
 view.render({});
+controls.get('pane-head-p1')({ click_count: 1 });
+assert.deepEqual(calls.splice(0), [{ command: 'pane.focus', args: { pane: 'p1' } }]);
+controls.get('pane-head-p1')({ click_count: 2 });
+assert.deepEqual(calls.splice(0), [{ command: 'pane.focus', args: { pane: 'p1' } }, { command: 'pane.zoom', args: { pane: 'p1' } }]);
 assert(controls.has('ph-tab-p1'), 'Agent split exposes the move action');
 controls.get('ph-tab-p1')({}, { stop_propagation() {} });
 assert.equal(overlay.props.name, 'π > 子 Agent 任务', 'new tab follows the moved pane rather than the parent tab');
