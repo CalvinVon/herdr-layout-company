@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>会话窗格分隔 · 三版方向</title>
+<style>
+  :root {
+    --font-ui: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+    --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-ui);
+    background: #eceff2;
+    color: #20242a;
+    -webkit-font-smoothing: antialiased;
+    padding: 40px 32px 64px;
+  }
+  .page-head { max-width: 1180px; margin: 0 auto 28px; }
+  .eyebrow { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: #7b8492; }
+  h1 { font-size: 26px; font-weight: 650; letter-spacing: -.015em; margin: 8px 0 6px; }
+  .lede { font-size: 13.5px; line-height: 1.6; color: #5b6472; max-width: 720px; }
+  .lede b { font-weight: 600; color: #333a45; }
+  .legend { display: flex; gap: 18px; margin-top: 14px; font-size: 12px; color: #6b7482; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  .variants { max-width: 1180px; margin: 0 auto; display: grid; gap: 30px; }
+  .variant {
+    background: #fff; border-radius: 14px; padding: 20px 20px 22px;
+    box-shadow: 0 1px 0 rgba(20,26,34,.05), 0 10px 26px -18px rgba(20,26,34,.35);
+  }
+  .variant-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .tag { font-family: var(--font-mono); font-size: 11px; padding: 2px 7px; border-radius: 5px; background: #eef1f4; color: #59616e; }
+  .variant h2 { font-size: 16px; font-weight: 620; letter-spacing: -.01em; }
+  .variant p.note { font-size: 12.5px; line-height: 1.55; color: #6b7482; margin: 2px 0 14px; }
+  .variant p.note code { font-family: var(--font-mono); font-size: 11.5px; color: #3f4856; }
+
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 860px) { .pair { grid-template-columns: 1fr; } }
+
+  /* ---------- shared simulation shell ---------- */
+  .sim { border-radius: 10px; overflow: hidden; position: relative; border: 1px solid; }
+  .sim.light { --canvas: #eceff2; --bg: #ffffff; --chrome: #f4f6f8; --ink: #20242a; --muted: #747d8b; --dim: #9aa3b0; --line: #dfe3e8; --accent: #3b82f6; --sel: #eaf1fb; }
+  .sim.dark  { --canvas: #1b1f24; --bg: #262b31; --chrome: #20242a; --ink: #e6e9ee; --muted: #8e97a4; --dim: #6b7480; --line: #343a42; --accent: #6aa6f8; --sel: #2b3746; }
+  .sim { background: var(--canvas); border-color: var(--line); }
+  .sim-label { position: absolute; top: 8px; right: 10px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+
+  .shell { padding: 10px; display: grid; gap: var(--gap, 8px); grid-template-columns: 96px 1fr; height: 268px; }
+  .rail { background: var(--chrome); border-radius: 8px; padding: 8px 6px; display: flex; flex-direction: column; gap: 5px; }
+  .rail b { font-size: 10px; letter-spacing: .06em; color: var(--dim); font-weight: 600; padding: 2px 3px 4px; }
+  .rail u { text-decoration: none; font-size: 10.5px; color: var(--muted); padding: 4px 5px; border-radius: 4px; line-height: 1.25; }
+  .rail u.on { background: var(--sel); color: var(--ink); }
+
+  .grid { display: grid; grid-template-columns: 1.55fr 1fr; grid-template-rows: 1fr 1fr; gap: var(--gap, 8px); min-height: 0; }
+  .grid .wide { grid-row: span 2; }
+
+  .pane { background: var(--bg); border-radius: var(--radius); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .pane.focus { box-shadow: 0 0 0 1px var(--accent) inset; }
+  .phead { display: flex; align-items: center; gap: 6px; padding: 0 9px; height: 27px; flex: none; border-bottom: 1px solid var(--line); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: #79b27a; flex: none; }
+  .role { width: 13px; height: 13px; border-radius: 3px; background: var(--sel); flex: none; }
+  .pid { font-family: var(--font-mono); font-size: 9.5px; color: #4b8ef0; flex: none; }
+  .ptitle { font-size: 11px; color: var(--ink); font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pmeta { font-size: 9.5px; color: var(--dim); margin-left: auto; white-space: nowrap; }
+  .pbody { padding: 9px 10px; font-family: var(--font-mono); font-size: 9.5px; line-height: 1.7; color: var(--muted); white-space: pre-wrap; overflow: hidden; flex: 1; min-height: 0; }
+  .pbody .k { color: var(--ink); }
+  .pbody .a { color: #3c8fc7; }
+  .pbody .g { color: #7f9a7c; }
+  .chk { display: flex; gap: 6px; align-items: baseline; }
+  .chk i { width: 7px; height: 7px; border: 1px solid #c3cbd4; border-radius: 50%; flex: none; display: inline-block; transform: translateY(-1px); }
+
+  /* ---------- Option A: gap colour ---------- */
+  .optA { --canvas: #e7ebef; --bg: #ffffff; }
+  .optA .shell { --gap: 10px; }
+  .sim.dark.optA { --canvas: #171a1f; --bg: #282d34; }
+  .optA .pane { border: 1px solid var(--line); }
+  .optA .phead { background: var(--chrome); }
+
+  /* ---------- Option B: quiet chrome ---------- */
+  .optB { --canvas: #f7f8fa; --bg: #ffffff; }
+  .optB .shell { --gap: 8px; }
+  .sim.dark.optB { --canvas: #1e2228; --bg: #2a2f36; }
+  .optB .pane { box-shadow: 0 0 0 1px var(--line); }
+  .optB .phead { background: transparent; border-bottom-color: color-mix(in srgb, var(--line) 55%, transparent); }
+  .optB .pbody { color: var(--muted); }
+
+  /* ---------- Option C: surface tint per pane ---------- */
+  .optC { --canvas: #eef1f4; --bg: #ffffff; }
+  .optC .shell { --gap: 9px; }
+  .sim.dark.optC { --canvas: #1a1e23; --bg: #272c33; }
+  .optC .pane { background: var(--bg); }
+  .optC .pane:nth-child(2) { --bg: color-mix(in srgb, var(--bg) 96%, var(--chrome)); }
+  .optC .pane:nth-child(3) { --bg: color-mix(in srgb, var(--bg) 97%, var(--canvas)); }
+  .optC .pane:nth-child(4) { --bg: color-mix(in srgb, var(--bg) 95%, var(--chrome)); }
+  .optC .pane { border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+  .optC .pane.focus { border-color: transparent; }
+  .optC .phead { background: transparent; }
+</style>
+</head>
+<body>
+  <div class="page-head">
+    <div class="eyebrow">Herdr · session panes</div>
+    <h1>会话窗格分隔 · 三版方向</h1>
+    <p class="lede">按你的偏好：<b>主要靠窗格之间的底色与间隙区分</b>，对比保持克制，浅色与深色并排查看。三版都不改当前布局，只比较视觉方案。</p>
+    <div class="legend">
+      <span><i style="background:#3b82f6"></i>焦点窗格</span>
+      <span><i style="background:#e7ebef;border:1px solid #dfe3e8"></i>窗格之间</span>
+      <span><i style="background:#ffffff;border:1px solid #dfe3e8"></i>窗格内容</span>
+    </div>
+  </div>
+
+  <div class="variants">
+
+    <!-- ============ A ============ -->
+    <section class="variant">
+      <div class="variant-head"><span class="tag">A</span><h2>安静留白</h2></div>
+      <p class="note">结构不动，只让会话之间的间隙比内容更沉一点：浅色是冷灰，深色是更深的底色。窗格圆角与 <code>gap: 10</code> 共同承担分隔，看起来最接近现在的布局，但相邻会话不会再粘在一起。</p>
+      <div class="pair">
+        <div class="sim light optA"><span class="sim-label">浅色</span>
+          <div class="shell">
+            <aside class="rail"><b>SPACES</b><u class="on">DRN 迁移部</u><u>需求研发部</u><u>Mythos 研发部</u><u>打杂部</u></aside>
+            <div class="grid">
+              <div class="pane focus wide">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t7d</span><span class="ptitle">项目经理</span><span class="pmeta">working</span></div>
+                <div class="pbody"><span class="k">TODO</span> U1 占位订单迁移 · 0/5
+<span class="chk"><i></i> 核对 U1 缺页与隔离基线</span>
+<span class="chk"><i></i> 从旧页迁移占位订单</span>
+<span class="chk"><i></i> 运行定向测试与 H5 构建</span>
+<span class="chk"><i></i> 本地渲染并验证关键路径</span>
+
+<span class="a">hc wait t103 --timeout 55</span>
+<span class="g">Waiting for completion…</span></div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t122</span><span class="ptitle">技术 leader</span></div>
+                <div class="pbody">正在核对旧浏览器地址回退，随后判断首页迁移是否满足验收。TODO 1/1 · done</div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t111</span><span class="ptitle">测试工程师</span></div>
+                <div class="pbody">Build completed in 6.148s
+Build completed in 6.349s
+TODO 5/5 · done</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="sim dark optA"><span class="sim-label">深色</span>
+          <div class="shell">
+            <aside class="rail"><b>SPACES</b><u class="on">DRN 迁移部</u><u>需求研发部</u><u>Mythos 研发部</u><u>打杂部</u></aside>
+            <div class="grid">
+              <div class="pane focus wide">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t7d</span><span class="ptitle">项目经理</span><span class="pmeta">working</span></div>
+                <div class="pbody"><span class="k">TODO</span> U1 占位订单迁移 · 0/5
+<span class="chk"><i></i> 核对 U1 缺页与隔离基线</span>
+<span class="chk"><i></i> 从旧页迁移占位订单</span>
+<span class="chk"><i></i> 运行定向测试与 H5 构建</span>
+<span class="chk"><i></i> 本地渲染并验证关键路径</span>
+
+<span class="a">hc wait t103 --timeout 55</span>
+<span class="g">Waiting for completion…</span></div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t122</span><span class="ptitle">技术 leader</span></div>
+                <div class="pbody">正在核对旧浏览器地址回退，随后判断首页迁移是否满足验收。TODO 1/1 · done</div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t111</span><span class="ptitle">测试工程师</span></div>
+                <div class="pbody">Build completed in 6.148s
+Build completed in 6.349s
+TODO 5/5 · done</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ B ============ -->
+    <section class="variant">
+      <div class="variant-head"><span class="tag">B</span><h2>标题淡出</h2></div>
+      <p class="note">让每个会话的标题栏与内容连成一片，只用一条很浅的水平线收尾；会话之间仍是同一块画布。区分感来自“每块是一张卡”的形状，而不是边框。焦点会话用细强调环。</p>
+      <div class="pair">
+        <div class="sim light optB"><span class="sim-label">浅色</span>
+          <div class="shell">
+            <aside class="rail"><b>SPACES</b><u class="on">DRN 迁移部</u><u>需求研发部</u><u>Mythos 研发部</u><u>打杂部</u></aside>
+            <div class="grid">
+              <div class="pane focus wide">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t7d</span><span class="ptitle">项目经理</span><span class="pmeta">working</span></div>
+                <div class="pbody"><span class="k">TODO</span> U1 占位订单迁移 · 0/5
+<span class="chk"><i></i> 核对 U1 缺页与隔离基线</span>
+<span class="chk"><i></i> 从旧页迁移占位订单</span>
+<span class="chk"><i></i> 运行定向测试与 H5 构建</span>
+<span class="chk"><i></i> 本地渲染并验证关键路径</span>
+
+<span class="a">hc wait t103 --timeout 55</span>
+<span class="g">Waiting for completion…</span></div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t122</span><span class="ptitle">技术 leader</span></div>
+                <div class="pbody">正在核对旧浏览器地址回退，随后判断首页迁移是否满足验收。TODO 1/1 · done</div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t111</span><span class="ptitle">测试工程师</span></div>
+                <div class="pbody">Build completed in 6.148s
+Build completed in 6.349s
+TODO 5/5 · done</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="sim dark optB"><span class="sim-label">深色</span>
+          <div class="shell">
+            <aside class="rail"><b>SPACES</b><u class="on">DRN 迁移部</u><u>需求研发部</u><u>Mythos 研发部</u><u>打杂部</u></aside>
+            <div class="grid">
+              <div class="pane focus wide">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t7d</span><span class="ptitle">项目经理</span><span class="pmeta">working</span></div>
+                <div class="pbody"><span class="k">TODO</span> U1 占位订单迁移 · 0/5
+<span class="chk"><i></i> 核对 U1 缺页与隔离基线</span>
+<span class="chk"><i></i> 从旧页迁移占位订单</span>
+<span class="chk"><i></i> 运行定向测试与 H5 构建</span>
+<span class="chk"><i></i> 本地渲染并验证关键路径</span>
+
+<span class="a">hc wait t103 --timeout 55</span>
+<span class="g">Waiting for completion…</span></div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t122</span><span class="ptitle">技术 leader</span></div>
+                <div class="pbody">正在核对旧浏览器地址回退，随后判断首页迁移是否满足验收。TODO 1/1 · done</div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t111</span><span class="ptitle">测试工程师</span></div>
+                <div class="pbody">Build completed in 6.148s
+Build completed in 6.349s
+TODO 5/5 · done</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ C ============ -->
+    <section class="variant">
+      <div class="variant-head"><span class="tag">C</span><h2>同级底色</h2></div>
+      <p class="note">所有会话内容保持白／深底，只在画布上做非常轻微的层级：左侧主会话最亮，右侧辅助会话略微降低明度。靠色温而不是线条来分块，适合长时间盯屏。</p>
+      <div class="pair">
+        <div class="sim light optC"><span class="sim-label">浅色</span>
+          <div class="shell">
+            <aside class="rail"><b>SPACES</b><u class="on">DRN 迁移部</u><u>需求研发部</u><u>Mythos 研发部</u><u>打杂部</u></aside>
+            <div class="grid">
+              <div class="pane focus wide">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t7d</span><span class="ptitle">项目经理</span><span class="pmeta">working</span></div>
+                <div class="pbody"><span class="k">TODO</span> U1 占位订单迁移 · 0/5
+<span class="chk"><i></i> 核对 U1 缺页与隔离基线</span>
+<span class="chk"><i></i> 从旧页迁移占位订单</span>
+<span class="chk"><i></i> 运行定向测试与 H5 构建</span>
+<span class="chk"><i></i> 本地渲染并验证关键路径</span>
+
+<span class="a">hc wait t103 --timeout 55</span>
+<span class="g">Waiting for completion…</span></div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t122</span><span class="ptitle">技术 leader</span></div>
+                <div class="pbody">正在核对旧浏览器地址回退，随后判断首页迁移是否满足验收。TODO 1/1 · done</div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t111</span><span class="ptitle">测试工程师</span></div>
+                <div class="pbody">Build completed in 6.148s
+Build completed in 6.349s
+TODO 5/5 · done</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="sim dark optC"><span class="sim-label">深色</span>
+          <div class="shell">
+            <aside class="rail"><b>SPACES</b><u class="on">DRN 迁移部</u><u>需求研发部</u><u>Mythos 研发部</u><u>打杂部</u></aside>
+            <div class="grid">
+              <div class="pane focus wide">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t7d</span><span class="ptitle">项目经理</span><span class="pmeta">working</span></div>
+                <div class="pbody"><span class="k">TODO</span> U1 占位订单迁移 · 0/5
+<span class="chk"><i></i> 核对 U1 缺页与隔离基线</span>
+<span class="chk"><i></i> 从旧页迁移占位订单</span>
+<span class="chk"><i></i> 运行定向测试与 H5 构建</span>
+<span class="chk"><i></i> 本地渲染并验证关键路径</span>
+
+<span class="a">hc wait t103 --timeout 55</span>
+<span class="g">Waiting for completion…</span></div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t122</span><span class="ptitle">技术 leader</span></div>
+                <div class="pbody">正在核对旧浏览器地址回退，随后判断首页迁移是否满足验收。TODO 1/1 · done</div>
+              </div>
+              <div class="pane">
+                <div class="phead"><span class="dot"></span><span class="role"></span><span class="pid">t111</span><span class="ptitle">测试工程师</span></div>
+                <div class="pbody">Build completed in 6.148s
+Build completed in 6.349s
+TODO 5/5 · done</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

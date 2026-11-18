@@ -27,6 +27,11 @@ const Pane = new Function('View', 'div', 'svg', 'image', 'h_flex', 'v_flex', 'pa
 const view = new Pane();
 view.hovered = true;
 view.render({});
+let copied, stopped = false;
+controls.get('copy-pane-id-p1')({}, { stop_propagation() { stopped = true; }, write_to_clipboard(value) { copied = value; } });
+assert.equal(copied, 't1');
+assert.equal(stopped, true, 'copying an ID does not activate the pane header');
+assert.deepEqual(calls, []);
 controls.get('pane-head-p1')({ click_count: 1 });
 assert.deepEqual(calls.splice(0), [{ command: 'pane.focus', args: { pane: 'p1' } }]);
 controls.get('pane-head-p1')({ click_count: 2 });

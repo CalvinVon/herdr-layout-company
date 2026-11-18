@@ -21,7 +21,7 @@ function folder(cwd) {
 }
 
 export default class Pane extends View {
-  init(_props, cx) { this.hovered = false; this.direction = "right"; if (props()?.moveMenu) { this.handle = cx.focus_handle(); this.handle.focus(); } }
+  init(_props, cx) { this.hovered = false; this.direction = "right"; this.focused = null; if (props()?.moveMenu) { this.handle = cx.focus_handle(); this.handle.focus(); } cx.timer.every(1000, cx => { const pane = this.me(); if (pane && pane.focused !== this.focused) { this.focused = pane.focused; cx.notify(); } }); }
 
   me() {
     return panes().find((p) => p.pane === props()?.pane);
@@ -102,9 +102,9 @@ export default class Pane extends View {
       .px(10)
       .gap(8)
       .items_center()
-      .bg(t.background)
+      .bg(p.focused ? t.background : t.chrome)
       .border_b(1)
-      .border_color(t.border)
+      .border_color(p.focused ? t.border : t.chrome)
       .text_size(12)
       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
       .on_click(event => { run("pane.focus", { pane }); if (event.click_count === 2) run("pane.zoom", { pane }); })
@@ -114,7 +114,7 @@ export default class Pane extends View {
       .when(Boolean(terminal && isAgent), el => el.child(div().size(20).flex_none().flex().items_center().justify_center()
         .tooltip(terminal.parent ? `子 Agent · 父级：${parent?.title || terminal.parent} (${terminal.parent})` : `主 Agent · ${terminal.address}`)
         .child(svg(`mods/agent-columns-spaces/agent-chat-${terminal.parent ? "worker" : "lead"}.svg`).size(14).text_color(terminal.parent ? t.muted : t.accent))))
-      .when(Boolean(isAgent && p.terminal), el => el.child(div().flex_none().text_color(t.working).tooltip("Herdr 终端 ID").child(p.terminal)))
+      .when(Boolean(isAgent && p.terminal), el => el.child(div().id(`copy-pane-id-${pane}`).flex_none().text_color(t.working).cursor_pointer().tooltip(`点击复制 ${p.terminal}`).on_mouse_down("left", (_event, cx) => cx.stop_propagation()).on_mouse_up("left", (_event, cx) => cx.stop_propagation()).on_click((_event, cx) => { cx.stop_propagation(); cx.write_to_clipboard(p.terminal); }).child(p.terminal)))
       .child(div().flex_none().truncate().max_w(360).font_medium().text_color(t.foreground).tooltip(name).child(name))
       .child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd)))
       .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))

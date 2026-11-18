@@ -453,7 +453,7 @@ export default class SpacesTabs extends View {
                 .when(!expanded && ["working", "done"].includes(status), icon => icon.child(statusDot(status, `tab-${tb.id}`)))))
               .when(Boolean(rowPane?.terminal && raw.get(rowPane.terminal) && (rowPane.program?.agent || states.get(rowPane.pane))), el => el.child(div().id(`role-tab-${tb.id}`).size(13).flex_none().tooltip(raw.get(rowPane.terminal).parent ? `子 Agent · 父级：${raw.get(rowPane.terminal).parent}` : "主 Agent")
                 .child(svg(`mods/agent-columns-spaces/agent-chat-${raw.get(rowPane.terminal).parent ? "worker" : "lead"}.svg`).size(13).text_color(raw.get(rowPane.terminal).parent ? t.muted : t.accent))))
-              .when(Boolean(rowPane?.terminal && (rowPane.program?.agent || states.get(rowPane.pane))), el => el.child(div().max_w(70).flex_none().truncate().text_size(9).text_color(t.working).tooltip(rowPane.terminal).child(rowPane.terminal)))
+              .when(Boolean(rowPane?.terminal && (rowPane.program?.agent || states.get(rowPane.pane))), el => el.child(div().id(`space-tab-id-${tb.id}`).max_w(70).flex_none().truncate().text_size(9).text_color(t.working).tooltip(rowPane.terminal).child(rowPane.terminal)))
               .child(v_flex().id(`tab-title-${group.id}-${tb.id}`).min_w(0).flex_shrink_1().gap(2)
                 .when(mine.length > 1 && !parentPane, element => element
                   .tooltip(folded[tb.id] ? "点击标题展开分屏会话" : "点击标题折叠分屏会话")
@@ -501,7 +501,7 @@ export default class SpacesTabs extends View {
                   .tooltip(raw.get(p.terminal)?.parent ? `子 Agent · 父级：${raw.get(raw.get(p.terminal).parent)?.title || raw.get(p.terminal).parent} (${raw.get(p.terminal).parent})` : paneTitle(p)))
                 .when(Boolean(p.terminal && raw.get(p.terminal) && (p.program?.agent || states.get(p.pane))), el => el.child(div().id(`role-pane-${p.pane}`).size(13).flex_none().tooltip(raw.get(p.terminal).parent ? `子 Agent · 父级：${raw.get(p.terminal).parent}` : "主 Agent")
                   .child(svg(`mods/agent-columns-spaces/agent-chat-${raw.get(p.terminal).parent ? "worker" : "lead"}.svg`).size(13).text_color(raw.get(p.terminal).parent ? t.muted : t.accent))))
-                .when(Boolean(p.terminal && (p.program?.agent || states.get(p.pane))), el => el.child(div().max_w(70).flex_none().truncate().text_size(9).text_color(t.working).tooltip(p.terminal).child(p.terminal)))
+                .when(Boolean(p.terminal && (p.program?.agent || states.get(p.pane))), el => el.child(div().id(`space-pane-id-${p.pane}`).max_w(70).flex_none().truncate().text_size(9).text_color(t.working).tooltip(p.terminal).child(p.terminal)))
                 .child(div().id(`pane-label-${p.pane}`).min_w(0).flex_shrink_1().truncate().text_size(11.5).tooltip(states.get(p.pane) === "done" ? `${paneTitle(p)} · 已完成，待查看` : paneTitle(p))
                   .text_color(staleSession(raw.get(p.terminal)?.status_ms ?? coreState(p.terminal)?.since, now) ? t.dim : p.focused ? t.foreground : t.muted).child(paneTitle(p)))
                 .when(Boolean(p.workspaceFolder) && p.workspaceFolder !== p.gitTree?.path, el => el.child(folderBadge(p.workspaceFolder, staleSession(raw.get(p.terminal)?.status_ms ?? coreState(p.terminal)?.since, now))))

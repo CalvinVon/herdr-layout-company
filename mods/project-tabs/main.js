@@ -190,7 +190,7 @@ export default class Tabs extends View {
         .when(!lead && !worker && mine.length > 1, el => el.child(svg("mods/workspace-chrome/layers.svg").size(13).flex_none().text_color(t.muted)))
         .when(!lead && !worker && mine.length <= 1, el => el.child(div().size(7).rounded_full().flex_none().bg(t[status] ?? t.dim)))
         .when(Boolean(program?.icon), el => el.child((program.key === "omp" ? svg("mods/magpie-live/omp.svg").text_color(t.muted) : program.tint ? svg(program.icon).text_color(t.muted) : image(program.icon)).size(14).flex_none()))
-        .when(Boolean(program?.agent && agentPane?.terminal), el => el.child(div().flex_none().text_size(10).text_color(t.working).child(agentPane.terminal)))
+        .when(Boolean(program?.agent && agentPane?.terminal), el => el.child(div().id(`copy-tab-id-${c.id}`).flex_none().text_size(10).text_color(t.working).cursor_pointer().tooltip(`点击复制 ${agentPane.terminal}`).on_mouse_down("left", stop).on_mouse_up("left", stop).on_click((_event, cx) => { cx.stop_propagation(); cx.write_to_clipboard(agentPane.terminal); }).child(agentPane.terminal)))
         .child(div().max_w(280).truncate().child(c.zoomed ? `${name} Z` : name))
         .when(mine.length > 1, el => el.child(div().px(5).py(2).rounded(4).bg(t.raised).text_size(10).text_color(t.muted).tooltip(`${mine.length} 个分屏`).child(String(mine.length))))
         .when(status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))

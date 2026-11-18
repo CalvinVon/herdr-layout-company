@@ -38,6 +38,8 @@ const storage = new Map();
 let chart = { period: '7d', since: '2026-11-11T00:00:00Z', series: [{ label: 'Nov 17', calls: 1 }] };
 let usage = { period: 'today', since: '2026-11-17T00:00:00Z', calls: 1, series: [{ label: '00', calls: 1 }] };
 let quotas = [], history = [], active = [], recent = [], chartUnavailable = false;
+let focus = null, terminalList = [], agentList = [], openFiles = '';
+const filesByPid = new Map();
 const context = vm.createContext({
   console, Date: Clock, URL, Map, Set,
   localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
@@ -55,7 +57,7 @@ const context = vm.createContext({
 const dependencies = {
   'gpui-kit': { View: class {}, div: () => element('div'), svg: value => element('svg').source(value), image: value => element('image').source(value), PathBuilder: { fill: path, stroke: path } },
   'gpui-base': { h_flex: () => element('h'), v_flex: () => element('v') },
-  herdr: { home: () => '/test', readTextFile: async () => '{}', theme: () => colors, nextCommand: () => new Promise(() => {}), exec: async () => ({ stdout: '' }), focused: () => null, terminals: () => [], agents: () => [], layout: () => ({ children: [{ id: 'magpie-panel', hidden: true }] }) },
+  herdr: { home: () => '/test', appHome: () => '/test', readTextFile: async () => '{}', theme: () => colors, nextCommand: () => new Promise(() => {}), exec: async (_cmd, args) => ({ stdout: filesByPid.get(args?.[2]) ?? openFiles }), focused: () => focus, terminals: () => terminalList, agents: () => agentList, layout: () => ({ children: [{ id: 'magpie-panel', hidden: true }] }) },
 };
 const main = new vm.SourceTextModule(await readFile(new URL('./main.js', import.meta.url), 'utf8'), { context });
 await main.link(async name => {
@@ -200,6 +202,57 @@ let root = panel.render(cx);
 assert.ok(byId(root, 'route-decision-0'));
 assert.ok(byId(root, 'route-request-0'));
 assert.ok(texts(root).some(text => text.includes('model')));
+assert.ok(!texts(root).includes('无法识别当前会话'), 'an unidentified active session must not get a duplicate status card');
+panel.active = [];
+assert.ok(texts(panel.render(cx)).includes('无法识别当前会话'), 'show identification status when there are no active requests');
+focus = { terminal: 't1' };
+terminalList = [{ address: 't1', foreground: { pid: 123 } }];
+await refresh();
+assert.equal(panel.focusSession, null);
+const sessionId = '01234567-89ab-cdef-0123-456789abcdef';
+openFiles = `n/test/sessions/rollout-${sessionId}.jsonl`;
+await refresh();
+assert.equal(panel.focusSession, sessionId, 'retry a failed lookup when the process later opens its session');
+terminalList[0].report = { app: 'pi', msg: '1117｜探索｜连接 Chrome' };
+panel.active = [];
+assert.ok(texts(panel.render(cx)).includes('1117｜探索｜连接 Chrome'), 'the idle current session shows its name');
+assert.ok(texts(panel.render(cx)).includes('t1'), 'the idle current session displays its HC address');
+panel.active = [{ route: 7, agent: 'codex', session: sessionId, model: 'model' }];
+root = panel.render(cx);
+assert.ok(texts(root).includes('当前会话'), 'the matched active request is marked as current');
+assert.ok(texts(root).includes('1117｜探索｜连接 Chrome'), 'the active current session shows its name');
+assert.ok(!texts(root).includes('当前会话暂无进行中的请求'));
+const otherSession = '11234567-89ab-cdef-0123-456789abcdef';
+terminalList.push({ address: 't2', foreground: { pid: 234 } });
+agentList = [{ address: 't1', status: 'working' }, { address: 't2', status: 'working' }];
+filesByPid.set('234', `n/test/sessions/rollout-${otherSession}.jsonl`);
+active = [{ route: 7, agent: 'omp', session: sessionId }, { route: 8, agent: 'omp', session: otherSession }];
+await refresh();
+assert.deepEqual(Array.from(panel.sessionTerminals[sessionId]), ['t1']);
+assert.deepEqual(Array.from(panel.sessionTerminals[otherSession]), ['t2']);
+root = panel.render(cx);
+assert.ok(texts(root).includes('t1') && texts(root).includes('t2'), 'resolved HC addresses appear for their sessions');
+agentList = [];
+active = [];
+panel.routes = { [sessionId]: { id: 11, tries: [{ model: 'real-model' }], group: 'gpt' } };
+panel.active = [
+  { route: 10, agent: 'omp', session: sessionId, ms: 4600 },
+  { route: 11, agent: 'omp', session: sessionId, ms: 3100 },
+  { route: 12, agent: 'codex', session: 'other', served: 'other-model', ms: 1000 },
+  { route: 13, agent: 'omp', ms: 900 },
+  { route: 14, agent: 'omp', ms: 800 },
+];
+root = panel.render(cx);
+assert.ok(byId(root, 'route-decision-0') && byId(root, 'route-decision-1') && byId(root, 'route-decision-2') && byId(root, 'route-decision-3'));
+assert.equal(byId(root, 'route-decision-4'), undefined, 'same-session requests use one card; unknown sessions remain separate');
+assert.ok(byId(root, 'route-decision-request-0-0') && byId(root, 'route-decision-request-0-1'), 'both concurrent requests remain visible');
+assert.ok(texts(byId(root, 'route-decision-0')).includes('2 个请求'));
+assert.ok(texts(byId(root, 'route-decision-0')).includes('real-model'));
+assert.ok(texts(byId(root, 'route-decision-0')).includes('等待模型'));
+panel.active[0].phase = 'upstream';
+assert.ok(texts(byId(panel.render(cx), 'route-decision-0')).includes('模型信息不可用'), 'an upstream request without route details is not presented as waiting');
+panel.active = [{ route: 8, agent: 'codex', session: 'other', model: 'model' }];
+assert.ok(texts(panel.render(cx)).includes('当前会话暂无进行中的请求'), 'retain the idle current session alongside another session’s request');
 assert.ok(timers.every(timer => timer.ms >= 1000), 'static routes have no animation-frequency timer');
 assert.equal(built.filter(node => node.attrs.transition).length, 0, 'static routes do not schedule position transitions');
 console.log('Magpie checks passed: refresh, page isolation, chart values/tooltips/geometry, resize, time, quota history and hidden routes.');

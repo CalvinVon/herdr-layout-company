@@ -152,7 +152,7 @@
                     "width": 1,
                     "color": "accent"
                   },
-                  "radius": 10,
+                  "radius": 0,
                   "gap": 8,
                   "lone": true
                 }
@@ -176,7 +176,12 @@
                     {
                       "id": "editor",
                       "type": "block",
-                      "content": {"mod":"office-editor","props":{"message":"Opening TTT…"}}
+                      "content": {
+                        "mod": "office-editor",
+                        "props": {
+                          "message": "Opening TTT…"
+                        }
+                      }
                     },
                     {
                       "id": "changes",
@@ -229,7 +234,8 @@
               "max": 900
             }
           ],
-          "padding": [0, 8],
+          "padding": 12,
+          "background": "chrome",
           "gap": 8
         },
         {
@@ -248,8 +254,12 @@
     {
       "id": "magpie-panel",
       "type": "block",
-      "content": {"mod": "magpie-live"},
-      "size": {"px": 320}
+      "content": {
+        "mod": "magpie-live"
+      },
+      "size": {
+        "px": 320
+      }
     }
   ],
   "background": "canvas",

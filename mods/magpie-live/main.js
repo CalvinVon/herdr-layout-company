@@ -1,6 +1,6 @@
 import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { home, readTextFile, theme, nextCommand, exec, focused, terminals, agents, layout } from "herdr";
+import { home, appHome, readTextFile, theme, nextCommand, exec, focused, terminals, agents, layout } from "herdr";
 import { comparisonRange, usageComparison, usageChartData, usageChartPeriod } from "./usage-comparison.js";
 
 const BASE = "http://127.0.0.1:3425";
@@ -21,6 +21,26 @@ const percent = (value) => {
 };
 const periodPath = (base, period) => `${base}/v1/magpie/usage?period=${period}`;
 const countTokens = (value) => value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+
+async function terminalSession(terminal) {
+  const pid = terminal?.foreground?.pid;
+  if (!pid || terminal.address.includes("/")) return null;
+  try {
+    const files = await exec("/usr/sbin/lsof", ["-Fn", "-p", String(pid)]);
+    const lines = files.stdout.split("\n");
+    const ids = pattern => [...new Set(lines.flatMap(line => { const match = line.match(pattern); return match ? [match[1]] : []; }))];
+    const sessions = ids(/\/sessions\/.*?([0-9a-f-]{36})\.jsonl$/i);
+    const owners = ids(/\/session-owners\/([0-9a-f-]{36})\.lock$/i);
+    if (sessions.length === 1) return sessions[0];
+    if (!sessions.length && owners.length === 1) return owners[0];
+    if (terminal.report?.app === "pi" && terminal.report.msg && terminal.foreground?.cwd) {
+      const match = await exec("node", [`${appHome()}/mods/magpie-live/pi-session.cjs`, terminal.foreground.cwd, terminal.report.msg]);
+      const id = match.stdout.trim();
+      if (/^[0-9a-f-]{36}$/i.test(id)) return id;
+    }
+  } catch { /* The terminal may not expose a session file. */ }
+  return null;
+}
 const quotaPace = ({ remaining, start, reset }, now = Date.now()) => remaining !== null && start <= now && now < reset && reset > start ? Math.round(remaining - 100 * (reset - now) / (reset - start)) : null;
 const appendBar = (path, x, y, width, height) => {
   if (width <= 0 || height <= 0) return false;
@@ -85,6 +105,8 @@ export default class MagpieLive extends View {
     this.selectedRoute = null;
     this.focusTerminal = null;
     this.focusSession = null;
+    this.sessionTerminals = {};
+    this.ownerLookups = new Map();
     this.sessionColors = new Map();
     this.error = "";
     this.readAt = null;
@@ -127,7 +149,7 @@ export default class MagpieLive extends View {
       this.page === "routing" && !this.editQuotas && !this.hiddenSections.includes("quotas")
         ? [...this.quotaData().byProvider.entries()].filter(([provider]) => !this.hiddenProviders.includes(provider))
           .flatMap(([, entries]) => entries.filter((entry) => entry.window && !this.hiddenQuotas.includes(entry.key)).map((entry) => quotaPace(entry))) : null,
-      this.page === "routing" ? [this.active, this.routes, this.recent, this.recentError, this.groupNames, this.focusTerminal, this.focusSession] : null,
+      this.page === "routing" ? [this.active, this.routes, this.recent, this.recentError, this.groupNames, this.focusTerminal, this.focusSession, this.sessionTerminals] : null,
     ]);
     if (signature !== this.dataSignature) {
       this.dataSignature = signature;
@@ -160,24 +182,18 @@ export default class MagpieLive extends View {
         this.base = `http://127.0.0.1:${port}`;
         const focus = focused();
         const focusTerminal = focus?.shown || focus?.terminal || focus?.agent;
+        const focusKey = `${focusTerminal}|${focus?.cwd || ""}`;
         const terminal = terminals().find((item) => item.address === focusTerminal);
         const pid = terminal?.foreground?.pid;
         this.focusTerminal = focusTerminal;
-        const lookup = pid ? `${focusTerminal}|${pid}` : null;
-        if (lookup && lookup === this.sessionLookup?.key) {
+        const piTitle = terminal?.report?.app === "pi" ? terminal.report.msg : null;
+        const lookup = pid ? `${focusKey}|${pid}|${piTitle || ""}` : null;
+        if (lookup && lookup === this.sessionLookup?.key && this.sessionLookup.session) {
           this.focusSession = this.sessionLookup.session;
         } else {
           this.focusSession = null;
           if (lookup && !focusTerminal.includes("/")) {
-            try {
-              const files = await exec("/usr/sbin/lsof", ["-Fn", "-p", String(pid)]);
-              const lines = files.stdout.split("\n");
-              const ids = (pattern) => [...new Set(lines.flatMap((line) => { const match = line.match(pattern); return match ? [match[1]] : []; }))];
-              const sessions = ids(/\/sessions\/.*?([0-9a-f-]{36})\.jsonl$/i);
-              const owners = ids(/\/session-owners\/([0-9a-f-]{36})\.lock$/i);
-              if (sessions.length === 1) this.focusSession = sessions[0];
-              else if (!sessions.length && owners.length === 1) this.focusSession = owners[0];
-            } catch { /* The terminal may not expose a session file. */ }
+            this.focusSession = await terminalSession(terminal);
             this.sessionLookup = { key: lookup, session: this.focusSession };
           }
         }
@@ -242,6 +258,23 @@ export default class MagpieLive extends View {
           }
         }
         const sessions = [...new Set((active.active ?? []).map((request) => request.session).filter(Boolean))];
+        const liveAgents = new Set(agents().filter(agent => agent.status === "working").map(agent => agent.address));
+        const owners = await Promise.all((sessions.length ? terminals() : []).filter(item => liveAgents.has(item.address) && item.foreground?.pid && !item.address.includes("/")).map(async item => {
+          const key = `${item.address}|${item.foreground.pid}|${item.foreground.cwd || ""}|${item.report?.msg || ""}`;
+          const cached = item.address === focusTerminal && focusKey === this.focusKey ? this.focusSession : this.ownerLookups.get(key);
+          if (cached && sessions.includes(cached)) return [cached, item.address, key];
+          const id = await terminalSession(item);
+          if (id) this.ownerLookups.set(key, id);
+          return [id, item.address, key];
+        }));
+        this.focusKey = focusKey;
+        this.ownerLookups = new Map([...this.ownerLookups].filter(([key]) => owners.some(([, , currentKey]) => currentKey === key)));
+        this.sessionTerminals = {};
+        for (const [id, address] of owners) if (id && sessions.includes(id)) (this.sessionTerminals[id] ??= []).push(address);
+        if (this.focusSession && focusTerminal && sessions.includes(this.focusSession)) {
+          const addresses = this.sessionTerminals[this.focusSession] ??= [];
+          if (!addresses.includes(focusTerminal)) addresses.push(focusTerminal);
+        }
         const routeEntries = await Promise.all(sessions.map(async (session) => {
           try {
             const response = await fetch(`${this.base}/v1/magpie/route?session=${encodeURIComponent(session)}`);
@@ -549,6 +582,7 @@ export default class MagpieLive extends View {
       const focus = focused();
       const focusTerminal = focus?.shown || focus?.terminal || focus?.agent;
       const focusedAgent = agents().find((agent) => agent.address === focusTerminal);
+      const focusedTitle = terminals().find((terminal) => terminal.address === focusTerminal)?.report?.msg || focusedAgent?.title?.replace(/^π\s*[\u2800-\u28ff]?\s*/, "");
       const focusedType = focusedAgent?.app || focusedAgent?.program?.key;
       const currentSession = focusTerminal === this.focusTerminal ? this.focusSession : null;
       const current = (request) => Boolean(currentSession && request.session === currentSession);
@@ -559,7 +593,7 @@ export default class MagpieLive extends View {
       const actualModel = (request) => {
         const route = request.live ? this.routes[request.session] : null;
         const attempt = route && String(route.id) === String(request.route_id) ? route.tries?.[route.tries.length - 1] : null;
-        return request.served || attempt?.model || (!request.live ? request.model : null) || "等待模型";
+        return request.served || attempt?.model || (!request.live ? request.model : null) || (request.phase === "upstream" ? "模型信息不可用" : "等待模型");
       };
       const sourceNames = this.hiddenSections.includes("graph") ? [] : [...new Set(active.map(sourceKey))];
       const providerNames = this.hiddenSections.includes("graph") ? [] : [...new Set(active.map(provider))];
@@ -631,24 +665,39 @@ export default class MagpieLive extends View {
         session.unpriced ? `已计价 ≈$${Number(session.cost || 0).toFixed(3)} · 部分未计价` : session.cost != null ? `≈$${Number(session.cost).toFixed(3)}` : null,
       ].filter(Boolean).join(" · ") : "该时间段暂无统计";
       const currentRoutes = active.filter(current);
-      const activeRows = () => [...currentRoutes, ...active.filter((request) => !current(request))].map((request, i) => {
-        const latest = this.routes[request.session];
-        const route = latest && String(latest.id) === String(request.route_id) ? latest : null;
-        const reason = route?.rule?.when?.length ? route.rule.when.join(" · ") : route ? "网关未提供命中原因" : "等待路由决策";
-        const title = current(request) && focusedAgent?.title ? focusedAgent.title : `${request.agent || "Agent"} · ${request.session ? request.session.slice(-6) : "会话未知"}`;
-        return v_flex().id(`route-decision-${i}`).gap(4).p(10).rounded(8).bg(current(request) ? t.selected : light ? t.raised : t.surface)
-          .when(current(request), row => row.border(1).border_color(t.border))
-          .child(h_flex().gap(5).items_center().child(div().size(6).rounded_full().bg(sessionColor(request))).child(icon(request.agent || "Agent"))
-            .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).font_semibold().tooltip(title).child(title))
-            .when(current(request), row => row.child(text("当前会话", t.accent, 9).font_semibold())))
-          .child(h_flex().gap(4).items_center()
-            .child(div().min_w(0).truncate().text_size(11).text_color(t.accent).font_semibold().tooltip(actualModel(request)).child(actualModel(request)))
-            .when(Boolean(route?.group), row => row.child(text(`（${this.groupNames[route.group] || route.group}）`, t.muted, 10))))
-          .child(text(`原因 · ${reason}`, t.muted, 10))
-          .child(text(`回答中 · ${((request.ms || 0) / 1000).toFixed(1)} 秒`, t.working, 9))
-          .when(current(request) && i === 0, row => row.child(div().pt(4).border_t(1).border_color(t.border)
-            .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} · ${sessionId.slice(-8)} · ${sessionMetrics()}`, t.muted, 10))));
-      });
+      const activeRows = () => {
+        const groups = new Map();
+        for (const request of [...currentRoutes, ...active.filter((item) => !current(item))]) {
+          const key = request.session || request;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(request);
+        }
+        return [...groups.values()].map((group, i) => {
+          const request = group[0];
+          const title = current(request) && focusedTitle ? focusedTitle : `${request.agent || "Agent"} · ${request.session ? request.session.slice(-6) : "会话未知"}`;
+          return v_flex().id(`route-decision-${i}`).gap(4).p(10).rounded(8).bg(current(request) ? t.selected : light ? t.raised : t.surface)
+            .when(current(request), row => row.border(1).border_color(t.border))
+            .child(h_flex().gap(5).items_center().child(div().size(6).rounded_full().bg(sessionColor(request))).child(icon(request.agent || "Agent"))
+              .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(current(request) && focusedTitle ? t.muted : t.foreground).tooltip(title).when(!current(request) || !focusedTitle, label => label.font_semibold()).child(current(request) && focusedTitle ? `${request.agent || "Agent"} · ${request.session.slice(-6)}` : title))
+              .when(Boolean(this.sessionTerminals[request.session]?.length), row => row.child(text(this.sessionTerminals[request.session].join(" · "), t.working, 9)))
+              .when(group.length > 1, row => row.child(text(`${group.length} 个请求`, t.dim, 9)))
+              .when(current(request), row => row.child(text("当前会话", t.accent, 9))))
+            .when(Boolean(current(request) && focusedTitle), row => row.child(div().w_full().min_w(0).truncate().text_size(11).text_color(t.foreground).font_semibold().tooltip(title).child(title)))
+            .children(group.map((item, index) => {
+              const latest = this.routes[item.session];
+              const route = latest && String(latest.id) === String(item.route_id) ? latest : null;
+              const reason = route?.rule?.when?.length ? route.rule.when.join(" · ") : route ? "网关未提供命中原因" : item.phase === "upstream" ? "该请求路由详情不可用" : "等待路由决策";
+              return v_flex().id(`route-decision-request-${i}-${index}`).gap(4)
+                .when(index > 0, row => row.pt(4).border_t(1).border_color(t.border))
+                .child(h_flex().gap(4).items_center().child(div().min_w(0).truncate().text_size(11).text_color(t.accent).font_semibold().tooltip(actualModel(item)).child(actualModel(item)))
+                  .when(Boolean(route?.group), row => row.child(text(`（${this.groupNames[route.group] || route.group}）`, t.muted, 10))))
+                .child(text(`原因 · ${reason}`, t.muted, 10))
+                .child(text(`回答中 · ${((item.ms || 0) / 1000).toFixed(1)} 秒`, t.working, 9));
+            }))
+            .when(current(request) && i === 0, row => row.child(div().pt(4).border_t(1).border_color(t.border)
+              .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} · ${sessionId.slice(-8)} · ${sessionMetrics()}`, t.muted, 10))));
+        });
+      };
       const rows = () => requests.map((request, i) => {
         const expanded = this.selectedRoute != null && String(this.selectedRoute) === String(request.route_id);
         const latest = this.routes[request.session];
@@ -681,11 +730,13 @@ export default class MagpieLive extends View {
         { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageOverview(t) },
         { id: "usage-trend", name: "用量走势", extra: () => text(this.chartGranularity === "hour" ? "按小时" : "按天", t.dim, 10), view: () => this.usageChart(t) },
         { id: "decisions", name: "实时路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(6)
-          .when(!currentRoutes.length, body => body.child(v_flex().gap(5).p(10).rounded(8).bg(currentSession ? t.selected : light ? t.raised : t.surface)
+          .when(!currentRoutes.length && (currentSession || !active.length), body => body.child(v_flex().gap(5).p(10).rounded(8).bg(currentSession ? t.selected : light ? t.raised : t.surface)
             .when(Boolean(currentSession), card => card.border(1).border_color(t.border))
             .child(h_flex().items_center().gap(6)
-              .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).font_semibold().child(sessionId ? `${session?.agent || focusedType || "Agent"} · ${sessionId.slice(-8)}` : "尚无会话"))
+              .child(div().flex_1().min_w(0).truncate().text_size(9).text_color(t.muted).child(sessionId ? `${session?.agent || focusedType || "Agent"} · ${sessionId.slice(-8)}` : "尚无会话"))
+              .when(Boolean(currentSession && focusTerminal), row => row.child(text(focusTerminal, t.working, 9)))
               .child(text(currentSession ? "当前会话" : "最近会话", currentSession ? t.accent : t.dim, 9)))
+            .when(Boolean(currentSession && focusedTitle), card => card.child(div().w_full().min_w(0).truncate().text_size(11).text_color(t.foreground).font_semibold().tooltip(focusedTitle).child(focusedTitle)))
             .child(text(currentSession ? "当前会话暂无进行中的请求" : "无法识别当前会话", t.dim, 10))
             .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} · ${sessionMetrics()}`, t.muted, 10))))
           .children(activeRows()) },
