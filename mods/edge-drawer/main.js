@@ -6,12 +6,21 @@ const find = (tree, id) => tree?.id === id ? tree : (tree?.children ?? []).map((
 
 const CLOSE_DELAY = 240;
 const POINTER_INTERVAL = 80;
+const TRIGGER_WIDTH = 16;
 
 export default class EdgeDrawer extends View {
-  init() {
+  init(_props, cx) {
     this.overlayKey = `edge-drawer.${shared("layout")}.${(props() ?? {}).target}`;
     this.overlay = shared(this.overlayKey) ?? null;
     this.close();
+    cx.timer.every(POINTER_INTERVAL, next => {
+      if (this.overlay || !globalThis.window.is_window_active()) return;
+      const viewport = globalThis.window.viewport_size();
+      const pointer = globalThis.window.mouse_position();
+      const width = TRIGGER_WIDTH * (settings().zoom ?? 1);
+      const left = (props() ?? {}).id === "edge-right" ? viewport.width - width : 0;
+      if (pointer.x >= left && pointer.x <= left + width && pointer.y >= 0 && pointer.y <= viewport.height) this.open(next);
+    });
   }
 
   width(target) {

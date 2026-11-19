@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
-let options, tree, pointer, now, zoom;
+let options, tree, pointer, now, zoom, windowActive;
 const opened = [], closed = [], commands = [], sleeps = [];
+const timers = [];
 const sharedStorage = new Map();
 const handlers = {};
 const element = new Proxy({}, {
@@ -17,7 +18,7 @@ const context = vm.createContext({
   window: {
     viewport_size: () => ({ width: 1200, height: 800 }),
     mouse_position: () => pointer,
-    is_window_active: () => true,
+    is_window_active: () => windowActive,
   },
 });
 const dependencies = {
@@ -46,6 +47,7 @@ const tasks = [];
 const cx = {
   spawn: body => { tasks.push(body(cx)); },
   sleep: duration => new Promise(resolve => sleeps.push(() => { now += duration; resolve(); })),
+  timer: { every: (_duration, body) => timers.push(body) },
   notify() {},
 };
 const tick = async () => {
@@ -63,7 +65,9 @@ const reset = (target = "sidebar") => {
   pointer = { x: target === "sidebar" ? 0 : 1199, y: 100 };
   now = 0;
   zoom = 1;
+  windowActive = true;
   opened.length = closed.length = commands.length = tasks.length = sleeps.length = 0;
+  timers.length = 0;
   sharedStorage.clear();
   const drawer = new Drawer();
   drawer.init({}, cx);
@@ -139,4 +143,34 @@ assert.deepEqual(closed, ["overlay-1"], "Reloading the edge mod must close the o
 drawer.close();
 await tick();
 await Promise.all(tasks);
-console.log("Edge drawer: overlay geometry, unchanged layout, hover retention, delayed close, pinning and zoom passed.");
+
+for (const target of ["sidebar", "magpie-panel"]) {
+  for (const scale of [1, 2]) {
+    drawer = reset(target);
+    zoom = scale;
+    const before = JSON.stringify(tree);
+    const trigger = timers[0];
+    pointer.x = target === "sidebar" ? 16 * scale + 1 : 1200 - 16 * scale - 1;
+    trigger(cx);
+    assert.equal(opened.length, 0, "The drawer must stay closed outside the expanded edge zone");
+    pointer.x = target === "sidebar" ? 16 * scale : 1200 - 16 * scale;
+    pointer.y = -1;
+    trigger(cx);
+    assert.equal(opened.length, 0, "The trigger must stay within the window height");
+    pointer.y = 799;
+    windowActive = false;
+    trigger(cx);
+    assert.equal(opened.length, 0, "Inactive windows must not open a drawer");
+    windowActive = true;
+    trigger(cx);
+    assert.equal(opened.length, 1, "Both edges must trigger across the full 16px zone at the current zoom");
+    trigger(cx);
+    assert.equal(opened.length, 1, "Polling must reuse an already open drawer");
+    assert.equal(JSON.stringify(tree), before, "Expanding the trigger zone must not resize the central layout");
+    assert.equal(commands.length, 0);
+    drawer.close();
+    await tick();
+    await Promise.all(tasks);
+  }
+}
+console.log("Edge drawer: expanded edge triggers, overlay geometry, unchanged layout, hover retention, delayed close, pinning and zoom passed.");
