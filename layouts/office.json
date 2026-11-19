@@ -3,6 +3,21 @@
   "type": "row",
   "children": [
     {
+      "id": "edge-left",
+      "type": "block",
+      "content": {
+        "mod": "edge-drawer",
+        "props": {
+          "id": "edge-left",
+          "target": "sidebar",
+          "width": 440
+        }
+      },
+      "size": {
+        "px": 4
+      }
+    },
+    {
       "id": "sidebar",
       "type": "column",
       "children": [
@@ -259,6 +274,21 @@
       },
       "size": {
         "px": 320
+      }
+    },
+    {
+      "id": "edge-right",
+      "type": "block",
+      "content": {
+        "mod": "edge-drawer",
+        "props": {
+          "id": "edge-right",
+          "target": "magpie-panel",
+          "width": 320
+        }
+      },
+      "size": {
+        "px": 4
       }
     }
   ],

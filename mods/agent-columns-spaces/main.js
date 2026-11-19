@@ -1,6 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { spaces, panes, terminals, machines, theme, layout, run, shared, setShared, openOverlay, exec, nextCommand, appHome, home, readTextFile, writeTextFile, pickFolder, notify } from "herdr";
+import { spaces, panes, terminals, machines, theme, layout, run, shared, setShared, openOverlay, exec, nextCommand, appHome, home, readTextFile, writeTextFile, pickFolder, notify, placement, props } from "herdr";
 import { blockCollapsed, toggleBlock, restoreZoom, maximizePane } from "./sidebar-collapse.js";
 import { groupPaths, parentAgent } from "./path-groups.js";
 import { resolveProject, primarySpace, rememberWorktrees, consumeProjectRequest, mergeBindings } from "./project-bindings.js";
@@ -74,29 +74,32 @@ const toggleAllSpaces = () => setShared("agent-columns.spaces-folded", togglePro
 export default class SpacesTabs extends View {
   /** @param {any} _props @param {import("gpui-kit").Context} cx */
   init(_props, cx) {
+    this.floating = Boolean(placement() || props()?.overlay);
     this.dragFocus = {};
     this.syncDragFocus(cx);
-    if (blockCollapsed("spaces")) toggleBlock("spaces");
+    if (!this.floating && blockCollapsed("spaces")) toggleBlock("spaces");
     cx.spawn(async () => { for (;;) { if (await nextCommand() === "toggle-block") toggleAllSpaces(); } });
     /** @type {Record<string,import('./project-bindings.js').Binding>} */
     this.bindings = {};
-    this.projectOwner = `${Date.now()}-${Math.random()}`;
-    setShared("workspace.project-owner", this.projectOwner);
+    // A floating copy only mirrors the sidebar; the docked copy owns bindings.
+    if (!this.floating) {
+      this.projectOwner = `${Date.now()}-${Math.random()}`;
+      setShared("workspace.project-owner", this.projectOwner);
+    }
     this.bindingFile = `${appHome()}/project-bindings.json`;
     this.bindingText = null;
     /** @type {Record<string,{checked:number,message:string}>} */
     this.bindingFailures = {};
     /** @type {Record<string,number>} */
     this.metadataChecked = {};
-    this.refreshProjects(cx);
+    if (!this.floating) this.refreshProjects(cx);
     /** @type {Record<string, number>} */
     this.workingSince = {};
     this.sweepPhase = 0;
-    this.publishOffices();
+    if (!this.floating) this.publishOffices();
     cx.timer.every(1000, cx => {
       this.syncDragFocus(cx);
-      this.refreshProjects(cx);
-      this.publishOffices();
+      if (!this.floating) { this.refreshProjects(cx); this.publishOffices(); }
       if (this.hasWorking && globalThis.window.is_window_active()) cx.notify();
     });
     cx.timer.every(60000, cx => { if (!this.hasWorking) cx.notify(); });

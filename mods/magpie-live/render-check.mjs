@@ -34,16 +34,18 @@ function path() {
     : (...args) => { commands.push([name, ...args]); return builder; } });
   return builder;
 }
-const storage = new Map();
+let storage = new Map();
+const sharedStorage = new Map();
 let chart = { period: '7d', since: '2026-11-11T00:00:00Z', series: [{ label: 'Nov 17', calls: 1 }] };
 let usage = { period: 'today', since: '2026-11-17T00:00:00Z', calls: 1, series: [{ label: '00', calls: 1 }] };
 let quotas = [], history = [], active = [], recent = [], chartUnavailable = false;
 let focus = null, terminalList = [], agentList = [], openFiles = '';
+let panelHidden = true, overlayProps = {}, windowActive = true;
 const filesByPid = new Map();
 const context = vm.createContext({
   console, Date: Clock, URL, Map, Set,
   localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
-  window: { is_window_active: () => true, paint_path: (geometry, color) => element('path').geometry(geometry).color(color) },
+  window: { is_window_active: () => windowActive, paint_path: (geometry, color) => element('path').geometry(geometry).color(color) },
   fetch: async input => {
     const url = new URL(input);
     const data = url.pathname.endsWith('/requests') ? { rows: recent }
@@ -57,7 +59,7 @@ const context = vm.createContext({
 const dependencies = {
   'gpui-kit': { View: class {}, div: () => element('div'), svg: value => element('svg').source(value), image: value => element('image').source(value), PathBuilder: { fill: path, stroke: path } },
   'gpui-base': { h_flex: () => element('h'), v_flex: () => element('v') },
-  herdr: { home: () => '/test', appHome: () => '/test', readTextFile: async () => '{}', theme: () => colors, nextCommand: () => new Promise(() => {}), exec: async (_cmd, args) => ({ stdout: filesByPid.get(args?.[2]) ?? openFiles }), focused: () => focus, terminals: () => terminalList, agents: () => agentList, layout: () => ({ children: [{ id: 'magpie-panel', hidden: true }] }) },
+  herdr: { home: () => '/test', appHome: () => '/test', readTextFile: async () => '{}', theme: () => colors, nextCommand: () => new Promise(() => {}), exec: async (_cmd, args) => ({ stdout: filesByPid.get(args?.[2]) ?? openFiles }), focused: () => focus, terminals: () => terminalList, agents: () => agentList, props: () => overlayProps, shared: key => sharedStorage.get(key), setShared: (key, value) => sharedStorage.set(key, value), layout: () => ({ children: [{ id: 'magpie-panel', hidden: panelHidden }] }) },
 };
 const main = new vm.SourceTextModule(await readFile(new URL('./main.js', import.meta.url), 'utf8'), { context });
 await main.link(async name => {
@@ -255,4 +257,60 @@ panel.active = [{ route: 8, agent: 'codex', session: 'other', model: 'model' }];
 assert.ok(texts(panel.render(cx)).includes('当前会话暂无进行中的请求'), 'retain the idle current session alongside another session’s request');
 assert.ok(timers.every(timer => timer.ms >= 1000), 'static routes have no animation-frequency timer');
 assert.equal(built.filter(node => node.attrs.transition).length, 0, 'static routes do not schedule position transitions');
-console.log('Magpie checks passed: refresh, page isolation, chart values/tooltips/geometry, resize, time, quota history and hidden routes.');
+for (const floating of [false, true]) {
+  overlayProps = floating ? { overlay: 'magpie-drawer' } : {};
+  const lifecycle = new main.namespace.default();
+  let refreshes = 0;
+  const lifecycleTimers = [];
+  lifecycle.refresh = () => { refreshes++; };
+  lifecycle.init(undefined, { ...cx, spawn: () => {}, timer: { every: (ms, body) => lifecycleTimers.push({ ms, body }) } });
+  assert.equal(refreshes, floating ? 1 : 0, 'a floating Magpie must read immediately even when its docked panel is hidden');
+  const poll = lifecycleTimers.find(timer => timer.ms === 5000).body;
+  const resume = lifecycleTimers.find(timer => timer.ms === 1000).body;
+  poll(cx);
+  assert.equal(refreshes, floating ? 2 : 0, 'a floating Magpie must keep polling while the docked panel stays hidden');
+  if (floating) {
+    windowActive = false;
+    poll(cx);
+    assert.equal(refreshes, 2, 'background windows still defer polling');
+    windowActive = true;
+    resume(cx);
+    assert.equal(refreshes, 3, 'the floating panel resumes deferred polling when the window becomes active');
+  } else {
+    panelHidden = false;
+    resume(cx);
+    assert.equal(refreshes, 1, 'showing the docked panel resumes its deferred polling');
+    panelHidden = true;
+  }
+}
+overlayProps = {};
+sharedStorage.clear();
+storage = new Map([
+  ['magpie-live.overview-order', '["decisions","usage","graph"]'],
+  ['magpie-live.hidden-sections', '["quotas","requests"]'],
+  ['magpie-live.pinned-sections', '["decisions"]'],
+  ['magpie-live.chart-metric', 'cost'],
+]);
+const docked = new main.namespace.default();
+docked.init(undefined, { ...cx, spawn: () => {} });
+overlayProps = { overlay: 'magpie-drawer' };
+storage = new Map();
+const floating = new main.namespace.default();
+floating.init(undefined, { ...cx, spawn: () => {} });
+for (const field of ['overviewOrder', 'hiddenSections', 'pinnedSections', 'chartMetric']) {
+  assert.equal(JSON.stringify(floating[field]), JSON.stringify(docked[field]), `the drawer must preserve the docked panel's ${field} with separate per-copy storage`);
+}
+floating.setPage('usage', cx);
+overlayProps = {};
+docked.render(cx);
+assert.equal(docked.page, 'usage', 'changes made in the drawer must also appear when the docked panel returns');
+floating.setPage('routing', cx);
+overlayProps = { overlay: 'magpie-drawer' };
+const floatingRoot = floating.render(cx);
+const pinUsage = byId(floatingRoot, 'overview-pin-usage');
+assert.ok(pinUsage);
+pinUsage.attrs.on_click[0]({}, { ...cx, stop_propagation() {} });
+overlayProps = {};
+docked.render(cx);
+assert.ok(docked.pinnedSections.includes('usage'), 'pinning a section in the drawer must update the docked layout');
+console.log('Magpie checks passed: shared dock/drawer preferences, overlay initial load/polling/resume, refresh, page isolation, chart values/tooltips/geometry, resize, time, quota history and hidden routes.');
