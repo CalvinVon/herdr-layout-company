@@ -3,6 +3,15 @@
   "type": "row",
   "children": [
     {
+      "id": "project-coordinator",
+      "type": "block",
+      "content": {
+        "mod": "agent-columns-spaces",
+        "props": { "coordinator": true }
+      },
+      "size": { "px": 0 }
+    },
+    {
       "id": "edge-left",
       "type": "block",
       "content": {

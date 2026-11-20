@@ -74,32 +74,33 @@ const toggleAllSpaces = () => setShared("agent-columns.spaces-folded", togglePro
 export default class SpacesTabs extends View {
   /** @param {any} _props @param {import("gpui-kit").Context} cx */
   init(_props, cx) {
+    this.coordinator = props()?.coordinator === true;
+    /** @type {Record<string,import('./project-bindings.js').Binding>} */
+    this.bindings = {};
+    if (this.coordinator) {
+      this.projectOwner = `${Date.now()}-${Math.random()}`;
+      setShared("workspace.project-owner", this.projectOwner);
+      setShared("workspace.project-status", { ready: false, error: "正在读取 Space 文件夹，请稍后重试。" });
+      this.bindingFile = `${appHome()}/project-bindings.json`;
+      this.bindingText = null;
+      /** @type {Record<string,{checked:number,message:string}>} */
+      this.bindingFailures = {};
+      /** @type {Record<string,number>} */
+      this.metadataChecked = {};
+      this.refreshProjects(cx);
+      cx.timer.every(1000, cx => { this.refreshProjects(cx); this.publishOffices(); });
+      return;
+    }
     this.floating = Boolean(placement() || props()?.overlay);
     this.dragFocus = {};
     this.syncDragFocus(cx);
     if (!this.floating && blockCollapsed("spaces")) toggleBlock("spaces");
     cx.spawn(async () => { for (;;) { if (await nextCommand() === "toggle-block") toggleAllSpaces(); } });
-    /** @type {Record<string,import('./project-bindings.js').Binding>} */
-    this.bindings = {};
-    // A floating copy only mirrors the sidebar; the docked copy owns bindings.
-    if (!this.floating) {
-      this.projectOwner = `${Date.now()}-${Math.random()}`;
-      setShared("workspace.project-owner", this.projectOwner);
-    }
-    this.bindingFile = `${appHome()}/project-bindings.json`;
-    this.bindingText = null;
-    /** @type {Record<string,{checked:number,message:string}>} */
-    this.bindingFailures = {};
-    /** @type {Record<string,number>} */
-    this.metadataChecked = {};
-    if (!this.floating) this.refreshProjects(cx);
     /** @type {Record<string, number>} */
     this.workingSince = {};
     this.sweepPhase = 0;
-    if (!this.floating) this.publishOffices();
     cx.timer.every(1000, cx => {
       this.syncDragFocus(cx);
-      if (!this.floating) { this.refreshProjects(cx); this.publishOffices(); }
       if (this.hasWorking && globalThis.window.is_window_active()) cx.notify();
     });
     cx.timer.every(60000, cx => { if (!this.hasWorking) cx.notify(); });
@@ -262,12 +263,14 @@ export default class SpacesTabs extends View {
         if (!this.bindingsLoaded) this.bindingLoadFailed = true;
         if (result) setShared("workspace.project-result", { id: result.id, ok: false, error: `保存文件夹失败：${String(error)}` });
         this.projectStatusText = "";
-        setShared("workspace.project-status", { ready: false, error: String(error) });
+        const message = error == null || String(error) === "null" ? "文件夹服务读取或保存失败，请重新加载布局后重试。" : String(error);
+        setShared("workspace.project-status", { ready: false, error: message });
       } finally { this.projectBusy = false; }
       if (shared("workspace.project-owner") === this.projectOwner && this.bindingSnapshot !== this.renderedBindingSnapshot) { this.renderedBindingSnapshot = this.bindingSnapshot; cx.notify(); }
     });
   }
   render() {
+    if (this.coordinator) return div();
     const t = theme();
     const folded = /** @type {Record<string, boolean>} */ (shared("agent-columns.spaces-folded") ?? {});
     /** @param {string} id */
