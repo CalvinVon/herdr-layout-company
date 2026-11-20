@@ -219,7 +219,10 @@ export default class Tabs extends View {
       : null;
     const floatingKey = floating ? JSON.stringify([floating, floatingContent]) : null;
     if (this.floatingPanel?.key !== floatingKey) {
-      if (this.floatingPanel) closeOverlay(this.floatingPanel.id);
+      if (this.floatingPanel) {
+        setShared("project-tabs.floating-overlay", null);
+        closeOverlay(this.floatingPanel.id);
+      }
       this.floatingPanel = null;
       if (floating) {
         let content = floating.panel === "changes"
@@ -231,8 +234,9 @@ export default class Tabs extends View {
         if (floating.panel === "changes" && !floating.history && content) content = { ...content, content: { ...content.content, mod: "project-floating-changes" } };
         if (content) {
           const header = { id: "floating-header", type: "block", size: { px: 34 }, content: { mod: "project-panel-window", props: { panel: floating.panel, history: Boolean(floating.history) } } };
-          const id = openOverlay({ kind: "window", width: 0.7, height: 0.8, layout: { id: "floating-panel", type: "column", children: [header, content] } });
+          const id = openOverlay({ kind: "window", drag_handle: "floating-header", width: 0.7, height: 0.8, layout: { id: "floating-panel", type: "column", children: [header, content] } });
           this.floatingPanel = { id, key: floatingKey };
+          setShared("project-tabs.floating-overlay", id);
         }
       }
     }
@@ -262,11 +266,28 @@ export default class Tabs extends View {
         ? { mod: "space-home", kind: "dialog", width: 860, height: 680, props: { space: space.id, launcher: true } }
         : { mod: "space-folders", kind: "dialog", width: 560, height: 500 })))
       .when(["office", "agent-columns"].includes(shared("layout")), el => el.child(button("panel-mode", this.panelMode === "floating" ? "悬浮" : "插入", () => {
+        const opened = floating ?? (space && panel && !panel.hidden && enabled.includes(body?.active)
+          ? { space: space.id, panel: body.active, history: find(root, "git-body")?.active === "git-history" }
+          : null);
+        const document = opened?.panel === "files" ? shared("files-markdown.current") : null;
         this.panelMode = this.panelMode === "floating" ? "inline" : "floating";
         localStorage.setItem("panel-mode", this.panelMode);
         setShared("project-tabs.panel-mode", this.panelMode);
-        setShared("project-tabs.floating-panel", null);
+        setShared("project-tabs.floating-panel", this.panelMode === "floating" ? opened : null);
+        if (document) setShared("files-markdown.restore", { ...document, mode: this.panelMode });
         if (this.panelMode === "floating") run("layout.hide", { id: "panel" });
+        else {
+          if (space) {
+            this.panels[space.id] = opened?.panel ?? null;
+            localStorage.setItem("panels", JSON.stringify(this.panels));
+          }
+          if (opened) {
+            this.pending = { want: opened.panel, until: Date.now() + 1000 };
+            run("layout.select", { stack: "panel-body", child: opened.panel });
+            if (opened.panel === "changes") run("layout.select", { stack: "git-body", child: opened.history ? "git-history" : "git-changes" });
+            run("layout.show", { id: "panel" });
+          } else run("layout.hide", { id: "panel" });
+        }
         cx.notify();
       }).w(42).text_size(11).tooltip("切换面板显示方式")))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))

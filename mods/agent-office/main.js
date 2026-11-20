@@ -325,6 +325,13 @@ export default class Office extends View {
   }
 
 
+  openWallGoal(card) {
+    const project = this.currentProject;
+    openOverlay({ mod: "office-wall", kind: "dialog", width: 760, height: 650, props: {
+      roomKey: project.projectKey, roomName: project.name, services: [card], detailId: card.id,
+    } });
+  }
+
   useProject(project) {
     if (project.id !== this.currentProject?.id) {
       this.sceneOffset = 0;
@@ -461,7 +468,7 @@ export default class Office extends View {
     const wallServices = [...Object.values(this.wallCards[project.projectKey] ?? {}), ...(this.wallExtras[project.projectKey] ?? [])];
     const wallPinned = Array.isArray(this.wallPins[project.projectKey]) ? this.wallPins[project.projectKey] : [];
     const wallCards = [...wallServices, ...wallPinned.filter(pin => !wallServices.some(card => card.id === pin?.id))];
-    const wallBoardWidth = Math.max(400, 198 + wallCards.reduce((sum, card) => sum + (card.kind === "goal" ? 208 : 184) + 6, 0));
+    const wallBoardWidth = 412 + wallCards.filter(card => card.kind !== "goal" && card.kind !== "file").length * 190;
     const canvasWidth = Math.max(g.contentWidth, g.wallLeft + g.wallWidth + wallBoardWidth + 24);
     this.seat(here, g.door, cx);
     here.forEach((agent, index) => { this.desk[agent.address] = index; });
@@ -581,9 +588,12 @@ export default class Office extends View {
     const pinnedCards = Array.isArray(this.wallPins[roomKey]) ? this.wallPins[roomKey] : [];
     const serviceCards = [...Object.values(this.wallCards[roomKey] ?? {}), ...(this.wallExtras[roomKey] ?? [])].map(card => ({ ...card, qr: card.qr ?? pinnedCards.find(pin => pin?.id === card.id)?.qr }));
     const wallCards = S.orderWallCards([...serviceCards, ...pinnedCards.filter(pin => !serviceCards.some(card => card.id === pin?.id))]);
-    const boardWidth = Math.max(400, 198 + wallCards.reduce((sum, card) => sum + (card.kind === "goal" ? 208 : 184) + 6, 0));
+    const serviceTiles = wallCards.filter(card => card.kind !== "goal" && card.kind !== "file");
+    const fileCards = wallCards.filter(card => card.kind === "file");
+    const goal = wallCards.find(card => card.kind === "goal");
+    const boardWidth = 412 + serviceTiles.length * 190;
     const boardHeight = Math.min(h + 10, g.wallBottom - 40);
-    const tasks = wallCards.find(card => card.kind === "goal")?.tasks ?? [];
+    const tasks = goal?.tasks ?? [];
     return [
       ...T.roomBackdrop(W, H, g, this.currentProject, s, weather),
       div().id("wall-fixtures").absolute().left(g.wallLeft + boardWidth + 12).top(40).w(fixtures.reduce((sum, [w]) => sum + w, 0) + 12 * (fixtures.length - 1)).h(stripHeight).flex().gap(12).children(g.wallOrder.map((index, position) => {
@@ -610,27 +620,44 @@ export default class Office extends View {
                         .child(task.text))))
                   .size_full().pr(8).track_scroll(this.todoScroll)))
                 .when(Boolean(tasks.length), el => el.child(Scrollbar.vertical("office-todo-scroll").mode("always").absolute().inset_0())))))
-          .children(wallCards.map((card, index) => {
+          .child(div().id("office-delivery-board").w(208).h_full().flex_none().min_h(0).p(5).bg("#263f3b").flex().flex_col().overflow_hidden()
+            .on_click((_event, cx) => cx.stop_propagation())
+            .child(div().h(12).flex_none().flex().items_center().justify_between().line_height("12px").text_size(8.5).text_color("#c5d5bc")
+              .child(div().child("当前会话目标"))
+              .child(div().text_size(8).text_color("#aabeb0").child(`交付 ${fileCards.length}`)))
+            .when(Boolean(goal), el => el.child(div().id("office-wall-goal-link").w_full().min_w(0).h(16).flex_none().flex().items_center().cursor_pointer().text_size(9).line_height("12px").text_color("#f5d77d")
+              .tooltip(goal.text).accessibility_label("查看当前会话目标详情")
+              .hover(s => s.bg("#35534b"))
+              .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+              .on_click((_event, cx) => { cx.stop_propagation(); this.openWallGoal(goal); })
+              .child(div().flex_1().min_w(0).truncate().child(`↗ ${String(goal.text || goal.name).replace(/\s+/g, " ").trim()}`))))
+            .when(!goal, el => el.child(div().h(16).flex_none().flex().items_center().text_size(9).line_height("12px").text_color("#aabeb0").child("暂无目标")))
+            .child(div().h(1).my(3).flex_none().bg("#426058"))
+            .child(div().id("office-wall-files-viewport").flex_1().min_h(0).relative().overflow_hidden()
+              .on_scroll_wheel((_event, cx) => cx.stop_propagation())
+              .child(div().id("office-wall-files").size_full().overflow_y_scroll().flex().flex_col().gap(2).pr(10)
+                .when(!fileCards.length, el => el.child(div().text_size(9).line_height("12px").text_color("#aabeb0").child("暂无文件")))
+                .children(fileCards.map((card, index) => div().id(`office-wall-file-${index}`).w_full().min_w(0).h(15).flex_none().flex().items_center().px(2).rounded(2).cursor_pointer().text_size(9).line_height("12px").text_color("#f5d77d")
+                  .tooltip(`${card.name}\n${card.path}${card.source ? "\n" + card.source : ""}`).accessibility_label(`打开文件：${card.name}`)
+                  .hover(s => s.bg("#35534b"))
+                  .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+                  .on_click((_event, cx) => { cx.stop_propagation(); this.openWallFile(card.path, cx); })
+                  .child(div().flex_1().min_w(0).truncate().child(`↗ ${card.name}`)))))
+              .child(Scrollbar.vertical("office-wall-files").mode("always").absolute().inset_0())))
+          .children(serviceTiles.map((card, index) => {
             const matrix = Array.isArray(card?.qr) && card.qr.length >= 21 && card.qr.length <= 177 && card.qr.every(row => Array.isArray(row) && row.length === card.qr.length) ? card.qr : null;
             const unit = matrix ? Math.floor((boardHeight - 20) / (matrix.length + 8)) : 0;
-            const links = (card.kind === "note" || card.kind === "goal") ? [card.text] : card.kind === "file" ? [card.path] : (Array.isArray(card.urls) ? (card.qrKind === "generated" && card.qrUrl ? [card.qrUrl, ...card.urls.filter(url => url !== card.qrUrl)] : card.urls) : card.url ? [card.url] : []).slice(0, 2);
-            const isGoal = card.kind === "goal";
-            return div().id(`office-wall-card-${index}`).w(isGoal ? 208 : 184).h_full().p(3).flex_none().flex().gap(4).bg("#f0ebe1")
-              .when(card.kind === "file", el => el.cursor_pointer().on_click((_event, cx) => { cx.stop_propagation(); this.openWallFile(card.path, cx); }))
+            const links = card.kind === "note" ? [card.text] : (Array.isArray(card.urls) ? (card.qrKind === "generated" && card.qrUrl ? [card.qrUrl, ...card.urls.filter(url => url !== card.qrUrl)] : card.urls) : card.url ? [card.url] : []).slice(0, 2);
+            return div().id(`office-wall-card-${index}`).w(184).h_full().p(3).flex_none().flex().gap(4).bg("#f0ebe1")
               .when(Boolean(matrix && unit > 0), el => el.child(wallQR(matrix, unit, index === 0 ? "office-wall-qr" : `office-wall-qr-${index}`)))
               .child(div().flex_1().min_w(0).overflow_hidden().flex().flex_col().gap(2)
                 .child(div().w_full().flex().gap(4)
                   .child(div().flex_1().min_w(0).text_size(9).font_semibold().truncate().child(card.name || "服务")))
-                .child(div().text_size(9).text_color("#6b6054").child(isGoal ? (card.source || "会话标题") : card.kind === "file" ? "产出文件" : card.kind === "note" ? "重要信息" : ({ running: "运行中", stopped: "已停止", unknown: "状态未知" })[card.status] ?? "固定"))
-                .when(isGoal, el => el.child(div().w_full().flex_1().min_h(0).relative()
-                  .on_scroll_wheel((_event, cx) => cx.stop_propagation())
-                  .child(div().id(`office-wall-goal-scroll-${index}`).size_full().overflow_y_scroll().flex().flex_col().gap(2).pr(10)
-                    .child(div().flex_none().text_size(9).text_color("#3b3b44").whitespace_normal().child(card.text)))
-                  .child(Scrollbar.vertical(`office-wall-goal-scroll-${index}`).mode("always").absolute().inset_0())))
-                .when(!isGoal, el => el.child(div().text_size(9).text_color("#426c79").truncate().child(links[0] ?? "")))
-                .when(Boolean(card.source && !isGoal), el => el.child(div().text_size(8).text_color("#6b6054").truncate().child(card.source)))
+                .child(div().text_size(9).text_color("#6b6054").child(card.kind === "note" ? "重要信息" : ({ running: "运行中", stopped: "已停止", unknown: "状态未知" })[card.status] ?? "固定"))
+                .child(div().text_size(9).text_color("#426c79").truncate().child(links[0] ?? ""))
+                .when(Boolean(card.source), el => el.child(div().text_size(8).text_color("#6b6054").truncate().child(card.source)))
                 .when(Boolean(matrix), el => el.child(div().text_size(8).text_color("#6b6054").child(card.qrKind === "generated" ? "链接二维码" : "终端原码")))
-                .when(!isGoal, el => el.children(links.map(url => div().text_size(9).text_color("#426c79").truncate().child(url)))));
+                .children(links.map(url => div().text_size(9).text_color("#426c79").truncate().child(url))));
           })))
         .when(Boolean(roomKey && !this.currentProject?.machine), el => el.cursor_pointer().on_click(() => {
           const services = [...Object.values(this.wallCards[roomKey] ?? {}).map(({ signature, complete, ...card }) => card), ...(this.wallExtras[roomKey] ?? [])];

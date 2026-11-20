@@ -1,0 +1,277 @@
+diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
+index 4143cee..5591845 100644
+--- a/defaults/AGENTS.md
++++ b/defaults/AGENTS.md
+@@ -965,9 +965,14 @@ All of it is in `herdr.d.ts`. In short:
+   or centered. `key: "name"` remembers its spot (opening that key again
+   replaces it); `keep: true` with a key reopens it on the next start. A
+   layout switch closes windows; kept ones come back with their layout.
++  With a layout, `drag_handle: "title"` limits dragging to the block with explicit
++  `id: "title"` (use the layout id, without Herdr's internal overlay prefix).
++  Content stays selectable; controls in the title block can still stop mouse down.
++  A missing or hidden handle block disables dragging. Omit `drag_handle` for the
++  existing any-unhandled-press behavior; other kinds and single-mod overlays ignore it.
+   A window can hold a layout, terminals too: a terminal keeps its presses
+   (selecting text), so give it a mod block to drag by, a title bar:
+-  `openOverlay({ kind: "window", key: "t7", width: 600, height: 400, layout: { type: "column", children: [{ type: "block", size: { px: 28 }, content: { mod: "my-titlebar" } }, { type: "block", content: { terminal: "t7" } }] } })`.
++  `openOverlay({ kind: "window", key: "t7", drag_handle: "title", width: 600, height: 400, layout: { type: "column", children: [{ id: "title", type: "block", size: { px: 28 }, content: { mod: "my-titlebar" } }, { type: "block", content: { terminal: "t7" } }] } })`.
+ - Machine: `exec(cmd, args, { cwd, on })` (the user's real environment; use this,
+   not `process.run`; `on: space.machine` runs there, omitted means local).
+   It rejects if the program cannot start or the machine cannot be reached.
+diff --git a/defaults/herdr.d.ts b/defaults/herdr.d.ts
+index 90e3bd7..bcb0fa7 100644
+--- a/defaults/herdr.d.ts
++++ b/defaults/herdr.d.ts
+@@ -344,6 +344,11 @@ export interface OverlaySpec {
+    *  else centered; as big as its content unless width/height. It doesn't take the keyboard
+    *  when it opens (a mod may focus itself). A layout switch closes windows. */
+   kind?: "dialog" | "popup" | "window";
++  /** With `kind: "window"` and `layout`: only this block's bounds start a drag. Use the block's
++   *  explicit id from `layout`, without Herdr's overlay prefix. A missing or hidden block disables
++   *  dragging. Controls may still stop mouse down; content keeps text selection. Omit for any
++   *  unhandled press to drag. Ignored for other kinds and single-mod overlays. */
++  drag_handle?: string;
+   /** A dialog a click beside it doesn't close (Esc and its own buttons still do). */
+   modal?: boolean;
+   /** "none": no border, rounded corners, shadow or background around it; the mod draws its own. */
+diff --git a/src/window/movable.rs b/src/window/movable.rs
+index 7b4a4c7..3f971d5 100644
+--- a/src/window/movable.rs
++++ b/src/window/movable.rs
+@@ -1,6 +1,6 @@
+ //! Windows: overlays a mod opens with `kind: "window"`. They stay until
+-//! closed, move where they're dropped (a press anywhere the mod doesn't keep
+-//! for itself drags), and the one pressed last is on top. With a `key` a
++//! closed, move where they're dropped (by `drag_handle`, else any press the mod
++//! doesn't keep for itself), and the one pressed last is on top. With a `key` a
+ //! window remembers its spot, and opening that key again replaces it; with
+ //! `keep` it also reopens on the next start, in the layout that opened it.
+ //! A layout switch closes them (they belong to their layout, like its mods).
+@@ -120,8 +120,9 @@ impl AppWindow {
+             .on_mouse_down(
+                 MouseButton::Left,
+                 cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
+-                    cx.stop_propagation();
+-                    this.window_press(&press, ev.position, cx);
++                    if this.window_press(&press, ev.position, cx) {
++                        cx.stop_propagation();
++                    }
+                 }),
+             );
+         div().absolute().left(x).top(y).when(measured.is_none(), |d| d.opacity(0.0)).child(body).into_any_element()
+@@ -136,18 +137,26 @@ impl AppWindow {
+         }
+     }
+ 
+-    fn window_press(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
++    /// Whether the overlay keeps this press (including its terminal's selection).
++    fn window_press(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
++        let Some(o) = self.overlays.iter().find(|o| o.id == id) else { return false };
++        let bounds = self.bounds.borrow();
++        let blocks = o.layout.as_ref().map(Node::visible_blocks).unwrap_or_default();
++        if let Some(handle) = &o.drag_handle
++            && !(blocks.iter().any(|n| &n.id == handle) && bounds.get(handle).is_some_and(|b| b.contains(&at)))
++        {
++            // Content presses must reach TextSelectionLayer's bubble handler.
++            return false;
++        }
+         // A terminal in the window keeps its presses (selecting text).
+-        let on_terminal = self.overlays.iter().find(|o| o.id == id).and_then(|o| o.layout.as_ref()).is_some_and(|l| {
+-            let bounds = self.bounds.borrow();
+-            l.visible_blocks().iter().any(|n| matches!(n.content(), Some(Content::Terminal { .. })) && bounds.get(&n.id).is_some_and(|b| b.contains(&at)))
+-        });
+-        if on_terminal {
+-            return;
++        if blocks.iter().any(|n| matches!(n.content(), Some(Content::Terminal { .. })) && bounds.get(&n.id).is_some_and(|b| b.contains(&at)))
++        {
++            return true;
+         }
+-        let Some(b) = self.bounds.borrow().get(&format!("overlay:{id}")).copied() else { return };
++        let Some(b) = bounds.get(&o.slot) else { return false };
+         self.win_drag = Some(WinDrag { id: id.to_owned(), grab: at - b.origin, down: at, pointer: at, moving: false });
+         cx.notify();
++        true
+     }
+ 
+     fn window_move(&mut self, at: Point<Pixels>, pressed: bool, cx: &mut Context<Self>) {
+diff --git a/src/window.rs b/src/window.rs
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -326,6 +326,8 @@ struct Overlay {
+     /// A window: where its top left is (None: centered) and its name (`key`).
+     place: Option<Point<Pixels>>,
+     key: Option<String>,
++    /// A layout window's drag block, using its overlay-prefixed bounds id.
++    drag_handle: Option<String>,
+     /// The app's own screen (a `frame-` mod: What's new, the welcome): only
+     /// its own close ends it, never a layout switch.
+     frame: bool,
+@@ -3499,6 +3501,9 @@ impl AppWindow {
+                 None
+             }
+         });
++        let drag_handle = spec.get("drag_handle").and_then(Value::as_str)
++            .filter(|_| kind == OverlayKind::Window && layout.is_some())
++            .map(|block| format!("ov{id}/{block}"));
+         let (name, mut props) = if kind == OverlayKind::Toast {
+             ("toast".to_owned(), spec.get("notification").cloned().unwrap_or(Value::Null))
+         } else {
+@@ -3562,6 +3567,7 @@ impl AppWindow {
+             bare: spec.get("frame").and_then(Value::as_str) == Some("none"),
+             place,
+             key: key.clone(),
++            drag_handle,
+             frame: spec.get("mod").and_then(Value::as_str).is_some_and(|m| m.starts_with("frame-")),
+         });
+         if let Some(k) = &key {
+@@ -5395,6 +5401,7 @@ export default class Probe extends View {
+     }
+ 
+     include!("window/pane_size_tests.rs");
++    include!("window/movable_tests.rs");
+ 
+     #[test]
+     fn terminal_menu_preserves_clicked_target_and_uses_mod_dimensions() {
+diff --git a/src/window/movable_tests.rs b/src/window/movable_tests.rs
+new file mode 100644
+index 0000000..9a60155
+--- /dev/null
++++ b/src/window/movable_tests.rs
+@@ -0,0 +1,137 @@
++#[test]
++fn floating_windows_only_drag_by_their_handle() {
++    in_own_process("window_handle_pointer");
++}
++
++#[gpui::test]
++fn window_handle_pointer(cx: &mut gpui::TestAppContext) {
++    use gpui::{Modifiers, MouseButton, Point, Pixels};
++    use serde_json::json;
++    if !running_alone("window_handle_pointer") { return; }
++    let (view, cx) = open_window(cx, "drag-probe", r#"
++import { View, div } from "gpui-kit";
++import { TextView } from "gpui-base";
++import { props, setShared } from "herdr";
++export default class Probe extends View {
++  render() {
++    if (props().title) {
++      return div().size_full().child(div().w(48).h(32)
++        .on_mouse_down("left", (_event, cx) => {
++          setShared("probe.control", true);
++          cx.stop_propagation();
++        }));
++    }
++    return div().size_full().child(TextView.markdown("document",
++      "Selectable markdown stays inside the floating window.")
++      .scrollable(false).selectable(true));
++  }
++}
++"#, json!({"id": "main", "type": "block", "content": {"tab": "active"}}));
++    cx.simulate_resize(size(px(1000.), px(700.)));
++    let spec = json!({
++        "kind": "window", "drag_handle": "title", "frame": "none",
++        "at": {"x": 100, "y": 100}, "width": 400, "height": 240,
++        "layout": {"id": "root", "type": "column", "resizable": false, "children": [
++            {"id": "title", "type": "block", "size": {"px": 32},
++             "content": {"mod": "drag-probe", "props": {"title": true}}},
++            {"id": "content", "type": "block", "content": {"mod": "drag-probe"}}
++        ]}
++    });
++    view.update_in(cx, |this, window, cx| {
++        this.open_overlay("first".into(), spec.clone(), window, cx);
++        let mut other = spec.clone();
++        other["at"]["x"] = json!(600);
++        this.open_overlay("other".into(), other, window, cx);
++        assert_eq!(this.overlays.iter().find(|o| o.id == "first").unwrap().drag_handle.as_deref(), Some("ovfirst/title"));
++    });
++    cx.run_until_parked();
++    let bounds = |cx: &mut gpui::VisualTestContext, id: &str| {
++        view.read_with(cx, |this, _| *this.bounds.borrow().get(id).unwrap())
++    };
++    let drag = |cx: &mut gpui::VisualTestContext, from: Point<Pixels>, to: Point<Pixels>| {
++        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::default());
++        cx.run_until_parked();
++        cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::default());
++        cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
++        cx.run_until_parked();
++    };
++    let original = bounds(cx, "overlay:first");
++    let content = bounds(cx, "ovfirst/content");
++    let from = content.origin + point(px(2.), px(10.));
++    let to = from + point(px(160.), px(0.));
++    drag(cx, from, to);
++    assert_eq!(bounds(cx, "overlay:first"), original, "content must not move the window");
++    assert!(view.read_with(cx, |this, _| this.win_drag.is_none()));
++    assert_eq!(view.read_with(cx, |this, _| this.overlays.last().unwrap().id.clone()), "first", "content still raises the window");
++    let selected = cx.update(|window, cx| gpui_base::TextSelection::selected_text(window, cx));
++    assert!(!selected.trim().is_empty(), "native TextView must receive the selection press and drag");
++    cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" });
++    assert_eq!(cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())), Some(selected.trim().to_owned()));
++    cx.simulate_mouse_move(to + point(px(80.), px(0.)), None, Modifiers::default());
++    assert_eq!(cx.update(|window, cx| gpui_base::TextSelection::selected_text(window, cx)), selected, "release ends selection dragging");
++
++    // A title control keeps its press, but the capture handler still raises it.
++    let other = bounds(cx, "ovother/content").origin + point(px(100.), px(10.));
++    cx.simulate_click(other, Modifiers::default());
++    cx.run_until_parked();
++    let title = bounds(cx, "ovfirst/title");
++    let control = title.origin + point(px(20.), px(16.));
++    drag(cx, control, control + point(px(100.), px(60.)));
++    assert_eq!(crate::mods::shared("probe.control"), Some(json!(true)));
++    assert_eq!(bounds(cx, "overlay:first"), original);
++    assert_eq!(view.read_with(cx, |this, _| this.overlays.last().unwrap().id.clone()), "first");
++
++    let title = title.origin + point(px(100.), px(16.));
++    drag(cx, title, title + point(px(2.), px(0.)));
++    assert_eq!(bounds(cx, "overlay:first"), original, "small presses stay clicks");
++    let delta = point(px(80.), px(60.));
++    drag(cx, title, title + delta);
++    assert_eq!(bounds(cx, "overlay:first").origin, original.origin + delta);
++    assert_eq!(view.read_with(cx, |this, _| this.overlays.last().unwrap().place), Some(original.origin + delta));
++    let title = bounds(cx, "ovfirst/title").origin + point(px(100.), px(16.));
++    drag(cx, title, title + point(px(10000.), px(10000.)));
++    let viewport = cx.update(|window, _| window.viewport_size());
++    assert_eq!(bounds(cx, "overlay:first").origin, point(viewport.width - px(48.), viewport.height - px(48.)), "drag stays clamped on screen");
++    view.update_in(cx, |this, window, cx| {
++        this.remove_overlay("first", window, cx);
++        this.remove_overlay("other", window, cx);
++    });
++
++    // The same real pointer path covers legacy windows and invalid/hidden handles.
++    for (handle, hidden, terminal, movable) in [
++        (None, false, false, true),
++        (Some("missing"), false, false, false),
++        (Some("title"), true, false, false),
++        (None, false, true, false),
++        (Some("content"), false, true, false),
++    ] {
++        let mut spec = spec.clone();
++        spec["drag_handle"] = json!(handle);
++        spec["layout"]["children"][0]["hidden"] = json!(hidden);
++        if terminal {
++            spec["layout"]["children"][1]["content"] = json!({"terminal": "t1"});
++        }
++        view.update_in(cx, |this, window, cx| this.open_overlay("first".into(), spec, window, cx));
++        cx.run_until_parked();
++        let before = bounds(cx, "overlay:first");
++        let from = bounds(cx, "ovfirst/content").origin + point(px(100.), px(if hidden { 10. } else { 60. }));
++        if hidden {
++            assert!(bounds(cx, "ovfirst/title").contains(&from), "the hidden title retained stale bounds");
++        }
++        drag(cx, from, from + delta);
++        assert_eq!(bounds(cx, "overlay:first").origin, if movable { before.origin + delta } else { before.origin }, "handle={handle:?}, hidden={hidden}, terminal={terminal}");
++        view.update_in(cx, |this, window, cx| this.remove_overlay("first", window, cx));
++    }
++
++    // Single-mod windows keep their old behavior even if given a block handle.
++    view.update_in(cx, |this, window, cx| this.open_overlay("single".into(), json!({
++        "kind": "window", "mod": "drag-probe", "drag_handle": "missing", "frame": "none",
++        "at": {"x": 100, "y": 100}, "width": 400, "height": 240
++    }), window, cx));
++    cx.run_until_parked();
++    assert!(view.read_with(cx, |this, _| this.overlays.last().unwrap().drag_handle.is_none()));
++    let before = bounds(cx, "overlay:single");
++    let from = before.origin + point(px(100.), px(100.));
++    drag(cx, from, from + delta);
++    assert_eq!(bounds(cx, "overlay:single").origin, before.origin + delta);
++}

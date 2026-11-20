@@ -3,6 +3,13 @@ import { h_flex } from "gpui-base";
 import { props, shared, setShared, closeOverlay, theme } from "herdr";
 
 export default class PanelWindow extends View {
+  close() {
+    if (props()?.overlay && shared("project-tabs.floating-overlay") === props().overlay) {
+      setShared("project-tabs.floating-overlay", null);
+      setShared("project-tabs.floating-panel", null);
+    }
+  }
+
   render() {
     const t = theme(), p = props() ?? {};
     const button = (id, label, action, active = false) => div().id(id).px(8).h(24).flex().items_center().rounded(5)

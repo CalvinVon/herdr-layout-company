@@ -202,15 +202,24 @@ export default class Files extends View {
 
   render(cx) {
     if (key() !== this.context?.key) this.refresh(cx);
+    const mode = shared("project-tabs.panel-mode") || "inline", active = Boolean(props()?.floating) === (mode === "floating");
+    const restore = shared("files-markdown.restore");
+    if (active && restore?.mode === mode) {
+      setShared("files-markdown.restore", null);
+      if (restore.context === this.context?.key) { this.show(restore.file, cx); this.preview = restore.preview; }
+    }
     const requested = shared("files-markdown.open");
-    if (typeof requested === "string" && (shared("project-tabs.panel-mode") !== "floating" || props()?.floating)) {
+    if (typeof requested === "string" && active) {
       setShared("files-markdown.open", null);
       if (requested.startsWith("file:///")) this.openLink(requested, cx);
       else this.show(requested, cx);
     }
+    if (active) {
+      const current = { context: this.context?.key, file: this.file ?? null, preview: this.preview ?? true }, previous = shared("files-markdown.current");
+      if (previous?.context !== current.context || previous?.file !== current.file || previous?.preview !== current.preview) setShared("files-markdown.current", current);
+    }
     const t = theme();
     return v_flex().id("files").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
-      .when(Boolean(props()?.floating), el => el.on_mouse_down("left", (_event, cx) => cx.stop_propagation()))
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
         .when(Boolean(this.file), el => el.child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←")))
         .child(div().font_semibold().child("Files"))

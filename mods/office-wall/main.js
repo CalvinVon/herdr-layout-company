@@ -167,6 +167,14 @@ export default class OfficeWall extends View {
     const services = (Array.isArray(this.services) ? this.services : []).filter(card => card && typeof card.id === "string" && !this.hidden[card.id]);
     const pinIds = new Set(this.pins.map(card => card.id));
     const rows = [];
+    if (typeof p.detailId === "string") {
+      const goal = services.find(card => card.id === p.detailId && card.kind === "goal");
+      return v_flex().id("office-wall").track_focus(this.handle).size_full().p(20).gap(12).bg(t.popover).text_color(t.foreground)
+        .child(h_flex().items_center().justify_between().child(div().text_size(17).font_semibold().child("目标详情"))
+          .child(button("wall-close", "关闭", () => closeOverlay(p.overlay))))
+        .child(v_flex().id("office-wall-goal-detail").flex_1().min_h(0).overflow_y_scrollbar().gap(10)
+          .child(div().whitespace_normal().child(goal?.text || goal?.name || "暂无目标")));
+    }
     for (const card of services) rows.push({ ...card, observed: true, pinned: pinIds.has(card.id) });
     for (const card of this.pins) if (!services.some(service => service.id === card.id)) rows.push({ ...card, pinned: true, observed: false });
     const cards = rows.map((card, index) => {
