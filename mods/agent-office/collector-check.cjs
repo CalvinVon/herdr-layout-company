@@ -17,6 +17,8 @@ const service = { address: 't2', state: 'live', foreground: { name: 'node', pid:
 let publications = [{ id: 'agent-1', kind: 'note', name: '结论', text: '接口已确认', published: true, source: 'Agent · t1' }, { id: 'agent-2', kind: 'file', name: '报告', path: '/tmp/report.html', published: true, source: 'Agent · t1' }];
 const sharedValues = { 'workspace.office-groups': [room] };
 const files = new Map(), pending = [], timers = new Map();
+let windowActive = true, executions = 0;
+globalThis.window = { is_window_active: () => windowActive };
 const cx = { notify() {}, timer: { every(ms, fn) { timers.set(ms, fn); }, after() {} }, spawn(fn) { pending.push(Promise.resolve().then(() => fn(cx))); } };
 async function flush() { while (pending.length) await Promise.all(pending.splice(0)); }
 const env = { ...model, S, View: class {}, div() {}, svg() {}, A: {}, T: {}, D: {},
@@ -25,6 +27,7 @@ const env = { ...model, S, View: class {}, div() {}, svg() {}, A: {}, T: {}, D: 
   appHome: () => '/app', readTextFile: async file => files.get(file) ?? null,
   writeTextFile: async (file, text, expected) => { if ((files.get(file) ?? null) !== expected) throw Error('stale'); files.set(file, text); },
   exec: async (command, args) => {
+    executions++;
     if (command === 'mktemp') return { code: 0, stdout: '/tmp/wall-test\n' };
     if (args?.[1] === 'list') return { code: 0, stdout: JSON.stringify({ rooms: { 'local:a': publications } }) };
     if (args?.[1] === 'remove') { publications = publications.filter(card => card.id !== args[5]); return { code: 0, stdout: '' }; }
@@ -32,6 +35,7 @@ const env = { ...model, S, View: class {}, div() {}, svg() {}, A: {}, T: {}, D: 
     if (args?.[0]?.endsWith('wall-observer.cjs')) return { code: 0, stdout: JSON.stringify({ parsed: { urls: ['http://localhost:8081/'] }, qr: Array.from({ length: 21 }, () => Array(21).fill(true)), qrKind: 'generated', qrUrl: 'http://localhost:8081/', complete: true }) };
     throw Error('unexpected command');
   }, run() {}, openOverlay() {}, fetch: async () => ({ ok: false }) };
+env.VirtualListScrollHandle = { new: () => ({ scroll_to_item() {} }) };
 const Office = load('main.js', env).default;
 (async () => {
   const office = new Office(); office.init({}, cx); await flush();
@@ -43,6 +47,17 @@ const Office = load('main.js', env).default;
   assert.ok(snapshot.some(card => card.kind === 'file' && card.path === '/tmp/report.html'));
   assert.ok(snapshot.some(card => card.id === 't2' && card.qrKind === 'generated' && card.qr.length === 21));
   timers.get(500)(cx); await flush();
+  const activeExecutions = executions;
+  windowActive = false;
+  timers.get(2000)(cx); await flush();
+  timers.get(2000)(cx); await flush();
+  assert.equal(executions, activeExecutions, 'inactive routine ticks must not launch collector subprocesses');
+  windowActive = true;
+  timers.get(500)(cx); await flush();
+  assert.ok(executions > activeExecutions, 'reactivation refreshes even when the terminal focus is unchanged');
+  const resumedExecutions = executions;
+  timers.get(500)(cx); await flush();
+  assert.equal(executions, resumedExecutions, 'active focus checks must not repeatedly collect unchanged state');
   focus = { terminal: 't3', pane: 'p3', tab: 'tab1' };
   timers.get(500)(cx);
   assert.equal(office.wallGoal, null);

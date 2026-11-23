@@ -39,6 +39,15 @@ export function parseWorktrees(text) {
   return list;
 }
 
+/** @param {string} root @param {string|null} machine @param {typeof import('herdr').exec} execute @returns {Promise<Worktree[]>} */
+export async function readWorktrees(root, machine, execute) {
+  const result = await execute("git", ["worktree", "list", "--porcelain", "-z"], { cwd: root, on: machine || null });
+  if (result.code !== 0) throw new Error(result.stderr || "无法读取 Git worktree");
+  const worktrees = parseWorktrees(result.stdout);
+  if (!worktrees.length) throw new Error("Git 未返回主 worktree");
+  return worktrees;
+}
+
 /** @param {string} folder @param {string|null} machine @param {typeof import('herdr').exec} execute @returns {Promise<Binding>} */
 export async function resolveProject(folder, machine, execute) {
   const on = machine || null;
@@ -51,10 +60,7 @@ export async function resolveProject(folder, machine, execute) {
     if (!/not a git repository/i.test(top.stderr)) throw new Error(top.stderr || "无法读取 Git 项目");
     return { projectKey: projectKey(on, cwd), root: cwd, name: basename(cwd), machine: on, git: false, worktrees: [{ path: cwd, branch: "", name: basename(cwd) }], initialFolder: cwd };
   }
-  const result = await execute("git", ["worktree", "list", "--porcelain", "-z"], { cwd, on });
-  if (result.code !== 0) throw new Error(result.stderr || "无法读取 Git worktree");
-  const worktrees = parseWorktrees(result.stdout);
-  if (!worktrees.length) throw new Error("Git 未返回主 worktree");
+  const worktrees = await readWorktrees(cwd, on, execute);
   const root = worktrees[0].path;
   return { projectKey: projectKey(on, root), root, name: basename(root), machine: on, git: true, worktrees, initialFolder: cwd };
 }

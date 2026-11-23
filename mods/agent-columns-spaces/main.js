@@ -3,7 +3,7 @@ import { h_flex, v_flex } from "gpui-base";
 import { spaces, panes, terminals, machines, theme, layout, run, shared, setShared, openOverlay, exec, nextCommand, appHome, home, readTextFile, writeTextFile, pickFolder, notify, placement, props } from "herdr";
 import { blockCollapsed, toggleBlock, restoreZoom, maximizePane } from "./sidebar-collapse.js";
 import { groupPaths, parentAgent } from "./path-groups.js";
-import { resolveProject, primarySpace, rememberWorktrees, consumeProjectRequest, mergeBindings } from "./project-bindings.js";
+import { resolveProject, readWorktrees, projectKey, primarySpace, rememberWorktrees, consumeProjectRequest, mergeBindings } from "./project-bindings.js";
 import { clean, tabTitle } from "./tab-title.js";
 import { homeTab, retainSpace, sessionTabs } from "./space-home.js";
 import { projectActive, sessionTime, staleSession, toggleProjects } from "./session-time.js";
@@ -92,6 +92,8 @@ export default class SpacesTabs extends View {
       return;
     }
     this.floating = Boolean(placement() || props()?.overlay);
+    const uiVisible = () => globalThis.window.is_window_active()
+      && (this.floating || layout()?.children?.some(node => node.id === "sidebar" && !node.hidden));
     this.dragFocus = {};
     this.syncDragFocus(cx);
     if (!this.floating && blockCollapsed("spaces")) toggleBlock("spaces");
@@ -100,18 +102,19 @@ export default class SpacesTabs extends View {
     this.workingSince = {};
     this.sweepPhase = 0;
     cx.timer.every(1000, cx => {
+      if (!uiVisible()) return;
       this.syncDragFocus(cx);
-      if (this.hasWorking && globalThis.window.is_window_active()) cx.notify();
+      if (this.hasWorking) cx.notify();
     });
-    cx.timer.every(60000, cx => { if (!this.hasWorking) cx.notify(); });
+    cx.timer.every(60000, cx => { if (uiVisible() && !this.hasWorking) cx.notify(); });
     // Travel out and back continuously, then pause 2.5s before the next round trip.
     cx.timer.every(5700, cx => {
-      if (!this.hasWorking) return;
+      if (!this.hasWorking || !uiVisible()) return;
       this.sweepPhase = 0;
       cx.notify();
-      cx.timer.after(60, cx => { this.sweepPhase = 1; cx.notify(); });
-      cx.timer.after(1660, cx => { this.sweepPhase = 2; cx.notify(); });
-      cx.timer.after(3260, cx => { this.sweepPhase = 3; cx.notify(); });
+      cx.timer.after(60, cx => { if (uiVisible()) { this.sweepPhase = 1; cx.notify(); } });
+      cx.timer.after(1660, cx => { if (uiVisible()) { this.sweepPhase = 2; cx.notify(); } });
+      cx.timer.after(3260, cx => { if (uiVisible()) { this.sweepPhase = 3; cx.notify(); } });
     });
   }
   syncDragFocus(cx) {
@@ -209,14 +212,14 @@ export default class SpacesTabs extends View {
           const binding = this.bindings[space.id];
           if (binding) {
             for (const project of binding.folders ?? [binding]) {
-              if (!project.git || Date.now() - (this.metadataChecked[project.projectKey] ?? 0) <= 5000) continue;
+              if (!project.git || Date.now() - (this.metadataChecked[project.projectKey] ?? 0) <= 30000) continue;
               this.metadataChecked[project.projectKey] = Date.now();
               try {
-                const current = await resolveProject(project.root, binding.machine, exec);
-                if (current.projectKey !== project.projectKey) throw new Error("项目根目录已改变，请显式打开新项目");
+                const worktrees = await readWorktrees(project.root, binding.machine, exec);
+                if (projectKey(binding.machine, worktrees[0].path) !== project.projectKey) throw new Error("项目根目录已改变，请显式打开新项目");
                 for (const value of Object.values(this.bindings)) {
-                  if (value.projectKey === project.projectKey) value.worktrees = current.worktrees;
-                  for (const folder of value.folders ?? []) if (folder.projectKey === project.projectKey) folder.worktrees = current.worktrees;
+                  if (value.projectKey === project.projectKey) value.worktrees = worktrees;
+                  for (const folder of value.folders ?? []) if (folder.projectKey === project.projectKey) folder.worktrees = worktrees;
                 }
                 delete this.bindingFailures[space.id];
               } catch (error) { this.bindingFailures[space.id] = { checked: Date.now(), message: String(error) }; }

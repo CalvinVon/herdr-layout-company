@@ -8,7 +8,7 @@ function load(file, exports, imports = {}) {
   return new Function(...Object.keys(imports), `${source}\nreturn {${exports}};`)(...Object.values(imports));
 }
 const home = load('space-home.js', 'homeTab,sessionTabs,retainSpace');
-const rules = load('project-bindings.js', 'resolveProject,primarySpace,rememberWorktrees,consumeProjectRequest,mergeBindings,projectKey,bindingFor,worktreeFor', home);
+const rules = load('project-bindings.js', 'resolveProject,readWorktrees,primarySpace,rememberWorktrees,consumeProjectRequest,mergeBindings,projectKey,bindingFor,worktreeFor', home);
 const groups = load('path-groups.js', 'groupPaths,parentAgent', { ...home, ...rules });
 const titles = load('tab-title.js', 'clean,tabTitle');
 
@@ -21,7 +21,7 @@ function fixture(machine = null) {
     primarySpace: 'calvin', terminalWorktrees: {}, terminalFolders: {} } } };
 }
 
-function harness({ machine = null, saved = fixture(machine), readFailure, failRead = false } = {}) {
+function harness({ machine = null, saved = fixture(machine), readFailure, failRead = false, git = false } = {}) {
   let text = JSON.stringify(saved, null, 2) + '\n', props = { coordinator: true };
   const state = new Map([['workspace.project-owner', 'unmounted-sidebar'], ['workspace.project-status', { ready: false, error: 'null' }]]);
   const scene = [{ id: 'calvin', folder: paths[0], machine, name: 'calvin', active: true,
@@ -30,8 +30,11 @@ function harness({ machine = null, saved = fixture(machine), readFailure, failRe
     { pane: 'home', tab: 'home', mod: 'space-home' }, { pane: 'foreign', tab: 'foreign-tab', terminal: 'other' }];
   const commands = [], executions = [], warnings = [], pending = [], timers = [];
   let writes = 0, writeFailure = false;
+  let clock = Date.now();
+  let worktreeText = `worktree ${paths[0]}\0branch refs/heads/main\0\0`;
   const api = {
     ...home, ...rules, ...groups, ...titles, View: class {}, div: () => ({ empty: true }),
+    Date: class extends Date { static now() { return clock; } },
     props: () => props, placement: () => null, blockCollapsed: () => false,
     spaces: () => scene, panes: () => panes, terminals: () => [{ address: 'terminal', cwd: paths[0] }],
     machines: () => [{ name: machine, layout: 'ready' }],
@@ -48,6 +51,7 @@ function harness({ machine = null, saved = fixture(machine), readFailure, failRe
       if (options.cwd === '/missing') return { code: 1, stdout: '', stderr: 'No such directory' };
       if (command === 'pwd') return { code: 0, stdout: `${options.cwd}\n`, stderr: '' };
       assert.equal(command, 'git');
+      if (git) return { code: 0, stdout: args[0] === 'worktree' ? worktreeText : `${paths[0]}\n`, stderr: '' };
       return { code: 128, stdout: '', stderr: 'fatal: not a git repository' };
     },
     run: (name, args) => { commands.push({ name, args }); }, pickFolder: async () => null,
@@ -63,6 +67,8 @@ function harness({ machine = null, saved = fixture(machine), readFailure, failRe
   async function drain() { while (pending.length) await pending.shift(); }
   return { state, commands, executions, warnings, service, NewMenu, cx, drain, timers,
     read: () => JSON.parse(text), writes: () => writes,
+    advance: ms => { clock += ms; },
+    worktrees: text => { worktreeText = text; },
     failWrite: value => { writeFailure = value; },
     async tick() { timers.find(timer => timer.ms === 1000).callback(cx); await drain(); },
     mountSidebar() {
@@ -97,6 +103,18 @@ async function check() {
     assert.equal(service[0].hidden, undefined);
     assert.equal(service[0].size.px, 0);
   }
+  const gitSaved = fixture();
+  gitSaved.bindings.calvin.git = true;
+  gitSaved.bindings.calvin.folders[0].git = true;
+  const metadata = harness({ saved: gitSaved, git: true });
+  metadata.service.init({}, metadata.cx); await metadata.drain();
+  assert.deepEqual(metadata.executions.map(call => call.args), [['worktree', 'list', '--porcelain', '-z']], 'periodic metadata uses the validated root without resolving it again');
+  metadata.advance(6000); await metadata.tick();
+  assert.equal(metadata.executions.length, 1, 'unchanged project metadata is not polled every five seconds');
+  metadata.worktrees(`worktree ${paths[0]}\0branch refs/heads/main\0\0worktree /feature\0branch refs/heads/feature\0\0`);
+  metadata.advance(30000); await metadata.tick();
+  assert.equal(metadata.executions.length, 2);
+  assert.equal(metadata.service.bindings.calvin.worktrees[1].branch, 'feature', 'external worktree changes remain discoverable');
   for (const machine of [null, 'remote-machine']) {
     const h = harness({ machine });
     h.service.init({}, h.cx);

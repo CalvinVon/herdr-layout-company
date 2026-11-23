@@ -7,6 +7,7 @@ const opened = [], closed = [], commands = [], sleeps = [];
 const timers = [];
 const sharedStorage = new Map();
 const handlers = {};
+let pointerReads = 0;
 const element = new Proxy({}, {
   get: (_target, name) => (...args) => {
     if (name.startsWith("on_")) handlers[name] = args[0];
@@ -16,8 +17,8 @@ const element = new Proxy({}, {
 const context = vm.createContext({
   Date: class extends Date { static now() { return now; } },
   window: {
-    viewport_size: () => ({ width: 1200, height: 800 }),
-    mouse_position: () => pointer,
+    viewport_size: () => { pointerReads++; return { width: 1200, height: 800 }; },
+    mouse_position: () => { pointerReads++; return pointer; },
     is_window_active: () => windowActive,
   },
 });
@@ -113,6 +114,10 @@ await Promise.all(tasks);
 
 drawer = reset();
 tree.children[0].hidden = false;
+drawer.render();
+const readsWhileVisible = pointerReads;
+timers[0](cx);
+assert.equal(pointerReads, readsWhileVisible, 'visible docked panels must skip edge pointer polling');
 drawer.open(cx);
 assert.equal(opened.length, 0, "A visible sidebar must not get a duplicate drawer");
 

@@ -83,19 +83,25 @@ function saveNumber(key, n) {
   try { localStorage.setItem(key, String(n)); } catch {}
 }
 
+const wallQRPaths = new WeakMap();
 function wallQR(matrix, unit, id) {
-  const path = PathBuilder.fill();
-  for (let y = 0; y < matrix.length; y++) {
-    for (let x = 0; x < matrix.length;) {
-      if (!matrix[y][x]) { x++; continue; }
-      const start = x;
-      while (x < matrix.length && matrix[y][x]) x++;
-      path.add_polygon([[(start + 4) * unit, (y + 4) * unit], [(x + 4) * unit, (y + 4) * unit], [(x + 4) * unit, (y + 5) * unit], [(start + 4) * unit, (y + 5) * unit]], true);
+  let geometry = wallQRPaths.get(matrix);
+  if (!geometry || geometry.unit !== unit) {
+    const path = PathBuilder.fill();
+    for (let y = 0; y < matrix.length; y++) {
+      for (let x = 0; x < matrix.length;) {
+        if (!matrix[y][x]) { x++; continue; }
+        const start = x;
+        while (x < matrix.length && matrix[y][x]) x++;
+        path.add_polygon([[(start + 4) * unit, (y + 4) * unit], [(x + 4) * unit, (y + 4) * unit], [(x + 4) * unit, (y + 5) * unit], [(start + 4) * unit, (y + 5) * unit]], true);
+      }
     }
+    geometry = { unit, path: path.build() };
+    wallQRPaths.set(matrix, geometry);
   }
   const size = (matrix.length + 8) * unit;
   return div().id(id).size(size).relative().flex_none().bg("#ffffff")
-    .child(globalThis.window.paint_path(path.build(), "#000000").absolute().left(0).top(0).w(size).h(size));
+    .child(globalThis.window.paint_path(geometry.path, "#000000").absolute().left(0).top(0).w(size).h(size));
 }
 
 export default class Office extends View {
@@ -119,20 +125,32 @@ export default class Office extends View {
     this.wallLastRequest = shared("office-wall.remove-request")?.token;
     this.wallFileText = null;
     this.wallClosed = false;
+    this.wallWindowActive = globalThis.window.is_window_active();
     this.createWallFile(cx);
     cx.timer.every(500, cx => {
+      const active = globalThis.window.is_window_active();
+      const resumed = active && !this.wallWindowActive;
+      this.wallWindowActive = active;
       const focus = focused();
-      if (!focus?.terminal && !focus?.agent && !focus?.pane && !focus?.tab) return;
-      const key = JSON.stringify([focus?.shown, focus?.terminal, focus?.agent, focus?.pane, focus?.tab, focus?.space]);
-      if (key === this.wallFocusKey) return;
-      this.wallFocusKey = key;
-      this.wallGoal = null;
-      this.wallExtras = Object.fromEntries(Object.entries(this.wallPublications).map(([room, cards]) => [room, [...cards]]));
-      cx.notify();
-      if (this.wallBusy) this.wallRefreshPending = true;
+      const hasFocus = focus?.terminal || focus?.agent || focus?.pane || focus?.tab;
+      const key = hasFocus ? JSON.stringify([focus?.shown, focus?.terminal, focus?.agent, focus?.pane, focus?.tab, focus?.space]) : this.wallFocusKey;
+      const changed = hasFocus && key !== this.wallFocusKey;
+      const request = shared("office-wall.remove-request");
+      const removal = request?.token !== undefined && request.token !== this.wallLastRequest;
+      if (!changed && !resumed && !removal) return;
+      if (changed) {
+        this.wallFocusKey = key;
+        this.wallGoal = null;
+        this.wallExtras = Object.fromEntries(Object.entries(this.wallPublications).map(([room, cards]) => [room, [...cards]]));
+        cx.notify();
+      }
+      if (this.wallBusy || !this.wallFile) this.wallRefreshPending = true;
       else this.refreshWall(cx);
     });
-    cx.timer.every(2000, cx => this.refreshWall(cx));
+    cx.timer.every(2000, cx => {
+      if (globalThis.window.is_window_active()) this.refreshWall(cx);
+      else this.wallWindowActive = false;
+    });
     cx.timer.every(1000, () => this.publishOverview());
     this.now = new Date();
     this.incident = loadNumber("office.incident") ?? Date.now();
@@ -156,7 +174,10 @@ export default class Office extends View {
         this.wallFile = `${dir}/services.json`;
         await writeTextFile(this.wallFile, "{}", null);
         this.wallFileText = "{}";
-        this.refreshWall(cx);
+        if (globalThis.window.is_window_active() || this.wallRefreshPending) {
+          this.wallRefreshPending = false;
+          this.refreshWall(cx);
+        }
       } catch (error) { this.wallError = String(error); cx.notify(); }
     });
   }
@@ -397,7 +418,7 @@ export default class Office extends View {
       if (a.status !== "blocked") delete this.blockedSince[a.address];
       else this.blockedSince[a.address] ??= was === "blocked" || !was ? (changed[a.tab] ?? now) : now;
       if (this.started && a.status === "done" && was && was !== "done") this.finishes.push(now);
-      this.seen[a.address] = { status: a.status, pal: A.look(a.address) };
+      this.seen[a.address] = { status: a.status, pal: this.seen[a.address]?.pal ?? A.look(a.address) };
     }
     if (this.party && now - this.party.start >= PARTY_LENGTH) this.party = null;
     this.finishes = this.finishes.filter((t) => now - t < PARTY_WINDOW);
@@ -454,7 +475,7 @@ export default class Office extends View {
     const project = this.projectSelection.choose(rooms, focused(), shared("agent-office.requested-project")) ?? { id: "loading", name: "正在载入项目办公室…", agents: [], members: [], theme: T.themeFor({ id: "loading" }) };
     this.useProject(project);
     this.overviewSnapshot = rooms.map(room => ({ id: room.id, projectKey: room.projectKey, duplicateOf: room.duplicateOf, name: room.name, folder: room.folder, machine: room.machine, theme: room.theme, active: room.active, target: room.target,
-      agents: room.agents.map(agent => ({ address: agent.address, pane: agent.pane, tab: agent.tab, status: agent.status, focused: agent.focused, title: agent.title, tab_name: agent.tab_name })) }));
+      agents: room.agents.map(agent => ({ address: agent.address, pane: agent.pane, tab: agent.tab, status: agent.status })) }));
     const list = project.agents;
     const here = list.filter(a => !remote(a.address));
     for (const agent of here) if (!this.tabOrder.includes(agent.tab)) this.tabOrder.push(agent.tab);
@@ -862,7 +883,7 @@ export default class Office extends View {
   person(a, at, g, placeFace, tab, alarmed) {
     const P = g.P;
     const napping = at.spot === "couch";
-    const base = A.look(a.address);
+    const base = this.seen[a.address]?.pal ?? A.look(a.address);
     const pal = napping ? { ...base, eye: "#00000000" } : base;
     const away = remote(a.address);
     const walking = Date.now() < at.until;

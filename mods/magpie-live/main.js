@@ -41,13 +41,9 @@ async function terminalSession(terminal) {
   const pid = terminal?.foreground?.pid;
   if (!pid || terminal.address.includes("/")) return null;
   try {
-    const files = await exec("/usr/sbin/lsof", ["-Fn", "-p", String(pid)]);
-    const lines = files.stdout.split("\n");
-    const ids = pattern => [...new Set(lines.flatMap(line => { const match = line.match(pattern); return match ? [match[1]] : []; }))];
-    const sessions = ids(/\/sessions\/.*?([0-9a-f-]{36})\.jsonl$/i);
-    const owners = ids(/\/session-owners\/([0-9a-f-]{36})\.lock$/i);
-    if (sessions.length === 1) return sessions[0];
-    if (!sessions.length && owners.length === 1) return owners[0];
+    const result = await exec("node", [`${appHome()}/mods/magpie-live/terminal-session.cjs`, String(pid), terminal.foreground?.cwd || "", terminal.report?.msg || ""]);
+    const id = result.stdout.trim();
+    if (/^[0-9a-f-]{36}$/i.test(id)) return id;
     if (terminal.report?.app === "pi" && terminal.report.msg && terminal.foreground?.cwd) {
       const match = await exec("node", [`${appHome()}/mods/magpie-live/pi-session.cjs`, terminal.foreground.cwd, terminal.report.msg]);
       const id = match.stdout.trim();
@@ -77,6 +73,28 @@ class ReadStatus extends View {
   }
 }
 
+class RouteDots extends View {
+  init(props) { this.update(props); }
+  update(props) { this.state = props; }
+  render() {
+    const { paths = [], start = 0, now = 0, width = 0, height = 0 } = this.state || {};
+    return div().id("route-dot-layer").absolute().left(0).top(0).w(width).h(height).children(paths.map((path, i) => {
+      const cycle = ((now - start + i * 350) % 4800) / 2400;
+      const progress = cycle <= 1 ? cycle : 2 - cycle;
+      const first = progress < 0.45, last = progress > 0.55;
+      const part = first ? progress / 0.45 : last ? (progress - 0.55) / 0.45 : (progress - 0.45) / 0.1;
+      const x1 = first ? path.fromX : path.middle, x2 = last ? path.toX : path.middle;
+      const y1 = first ? path.fromY : path.midLeftY, y2 = last ? path.toY : first ? path.midLeftY : path.midRightY;
+      const inverse = 1 - part;
+      const x = x1 + (x2 - x1) * (3 * inverse * inverse * part * 0.45 + 3 * inverse * part * part * 0.65 + part * part * part);
+      const y = y1 + (y2 - y1) * part * part * (3 - 2 * part);
+      const size = path.current ? 9 : 7;
+      return div().id(path.id).absolute().left(x - size / 2).top(y - size / 2).size(size).rounded_full().bg(path.color).opacity(path.dimmed ? 0.35 : 1)
+        .transition("left", { duration: 160, easing: "linear" }).transition("top", { duration: 160, easing: "linear" });
+    }));
+  }
+}
+
 export default class MagpieLive extends View {
   readPreferences() {
     this.page = ["routing", "usage"].includes(preferences.getItem("magpie-live.page")) ? preferences.getItem("magpie-live.page") : "routing";
@@ -103,7 +121,7 @@ export default class MagpieLive extends View {
 
   syncPreferences() {
     if (this.preferenceSnapshot === preferences.snapshot()) return false;
-    const period = this.period, granularity = this.chartGranularity;
+    const period = this.period, granularity = this.chartGranularity, page = this.page;
     this.readPreferences();
     if (period !== this.period || granularity !== this.chartGranularity) {
       this.usage = null;
@@ -111,6 +129,7 @@ export default class MagpieLive extends View {
       this.comparison = null;
       this.refreshDeferred = true;
     }
+    if (page !== this.page) this.refreshDeferred = true;
     return true;
   }
 
@@ -148,14 +167,24 @@ export default class MagpieLive extends View {
     this.routePaths = new Map();
     this.barWidths = new Map();
     this.barPaths = new Map();
+    this.motionStart = Date.now();
+    this.motionPaths = [];
+    this.motionHasPaths = false;
+    this.motionView = cx.new(RouteDots, { paths: [], start: this.motionStart });
     const visible = () => { const panel = layout()?.children?.find((node) => node.id === "magpie-panel"); return Boolean(props()?.overlay) || (Boolean(panel) && !panel.hidden); };
+    cx.timer.every(160, () => {
+      if (this.page !== "routing" || this.hiddenSections.includes("graph") || (!this.motionPaths.length && !this.motionHasPaths)) return;
+      if (!visible() || !globalThis.window.is_window_active()) return;
+      this.motionView.set_props({ paths: this.motionPaths, start: this.motionStart, now: Date.now(), width: this.motionWidth, height: this.motionHeight });
+      this.motionHasPaths = this.motionPaths.length > 0;
+    });
     cx.timer.every(5000, (next) => {
       if (visible() && globalThis.window.is_window_active()) this.refresh(next);
       else this.refreshDeferred = true;
     });
     cx.timer.every(1000, (next) => {
       if (this.syncPreferences()) next.notify();
-      if (this.refreshDeferred && visible() && globalThis.window.is_window_active() && Date.now() - (this.readAt ?? 0) > 5000) {
+      if (this.refreshDeferred && visible() && globalThis.window.is_window_active()) {
         this.refreshDeferred = false;
         this.refresh(next);
       }
@@ -191,10 +220,23 @@ export default class MagpieLive extends View {
     }
   }
 
+  async sessionFor(terminal) {
+    const pid = terminal?.foreground?.pid;
+    if (!pid || terminal.address.includes("/")) return null;
+    const key = JSON.stringify([terminal.created_ms, terminal.pid, pid, terminal.foreground.cwd, terminal.report?.app, terminal.report?.msg]);
+    const cached = this.ownerLookups.get(terminal.address);
+    if (cached?.key === key && Date.now() - cached.at < 15000) return cached.id;
+    const id = await terminalSession(terminal);
+    if (id) this.ownerLookups.set(terminal.address, { key, id, at: Date.now() });
+    else this.ownerLookups.delete(terminal.address);
+    return id;
+  }
+
   refresh(cx) {
     if (this.reading) return;
     this.reading = true;
-    const period = this.period, granularity = this.chartGranularity;
+    const period = this.period, granularity = this.chartGranularity, page = this.page;
+    const routing = page === "routing";
     const chartPeriod = usageChartPeriod(period, granularity);
     cx.spawn(async (next) => {
       try {
@@ -214,24 +256,13 @@ export default class MagpieLive extends View {
         const port = Number(settingsText ? (JSON.parse(settingsText).port ?? 3425) : 3425);
         if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Magpie 网关端口无效");
         this.base = `http://127.0.0.1:${port}`;
-        const focus = focused();
+        const focus = routing ? focused() : null;
         const focusTerminal = focus?.shown || focus?.terminal || focus?.agent;
-        const focusKey = `${focusTerminal}|${focus?.cwd || ""}`;
-        const terminal = terminals().find((item) => item.address === focusTerminal);
-        const pid = terminal?.foreground?.pid;
+        const terminal = routing ? terminals().find((item) => item.address === focusTerminal) : null;
+        this.focusSession = null;
         this.focusTerminal = focusTerminal;
-        const piTitle = terminal?.report?.app === "pi" ? terminal.report.msg : null;
-        const lookup = pid ? `${focusKey}|${pid}|${piTitle || ""}` : null;
-        if (lookup && lookup === this.sessionLookup?.key && this.sessionLookup.session) {
-          this.focusSession = this.sessionLookup.session;
-        } else {
-          this.focusSession = null;
-          if (lookup && !focusTerminal.includes("/")) {
-            this.focusSession = await terminalSession(terminal);
-            this.sessionLookup = { key: lookup, session: this.focusSession };
-          }
-        }
-        if (!this.recentReading) {
+        this.focusSession = await this.sessionFor(terminal);
+        if (routing && !this.recentReading) {
           this.recentReading = true;
           next.spawn(async (update) => {
             let changed = false;
@@ -268,15 +299,15 @@ export default class MagpieLive extends View {
         const [usageRes, quotaRes, activeRes, history, chartRes] = await Promise.all([
           fetch(periodPath(this.base, period)),
           fetch(`${this.base}/v1/magpie/quotas`),
-          fetch(`${this.base}/v1/magpie/concurrency`),
+          routing ? fetch(`${this.base}/v1/magpie/concurrency`) : null,
           readHistory(),
           chartPeriod === period ? null : fetch(periodPath(this.base, chartPeriod)).catch(() => null),
         ]);
-        for (const response of [usageRes, quotaRes, activeRes]) {
+        for (const response of [usageRes, quotaRes, activeRes].filter(Boolean)) {
           if (!response.ok) throw new Error(`Magpie HTTP ${response.status}`);
         }
         const [usage, quota, active] = await Promise.all([
-          usageRes.json(), quotaRes.json(), activeRes.json(),
+          usageRes.json(), quotaRes.json(), activeRes ? activeRes.json() : { active: [] },
         ]);
         const chartUsage = chartPeriod === period ? usage : chartRes?.ok ? await chartRes.json().catch(() => null) : null;
         const range = comparisonRange(usage);
@@ -292,17 +323,13 @@ export default class MagpieLive extends View {
           }
         }
         const sessions = [...new Set((active.active ?? []).map((request) => request.session).filter(Boolean))];
-        const liveAgents = new Set(agents().filter(agent => agent.status === "working").map(agent => agent.address));
+        const liveAgents = new Set((routing ? agents() : []).filter(agent => agent.status === "working").map(agent => agent.address));
         const owners = await Promise.all((sessions.length ? terminals() : []).filter(item => liveAgents.has(item.address) && item.foreground?.pid && !item.address.includes("/")).map(async item => {
-          const key = `${item.address}|${item.foreground.pid}|${item.foreground.cwd || ""}|${item.report?.msg || ""}`;
-          const cached = item.address === focusTerminal && focusKey === this.focusKey ? this.focusSession : this.ownerLookups.get(key);
-          if (cached && sessions.includes(cached)) return [cached, item.address, key];
-          const id = await terminalSession(item);
-          if (id) this.ownerLookups.set(key, id);
-          return [id, item.address, key];
+          const id = item.address === focusTerminal ? this.focusSession : await this.sessionFor(item);
+          return [id, item.address];
         }));
-        this.focusKey = focusKey;
-        this.ownerLookups = new Map([...this.ownerLookups].filter(([key]) => owners.some(([, , currentKey]) => currentKey === key)));
+        const retained = new Set([focusTerminal, ...owners.map(([, address]) => address)]);
+        this.ownerLookups = new Map([...this.ownerLookups].filter(([address]) => retained.has(address)));
         this.sessionTerminals = {};
         for (const [id, address] of owners) if (id && sessions.includes(id)) (this.sessionTerminals[id] ??= []).push(address);
         if (this.focusSession && focusTerminal && sessions.includes(this.focusSession)) {
@@ -316,7 +343,7 @@ export default class MagpieLive extends View {
             return [session, (await response.json()).route ?? null];
           } catch { return [session, null]; }
         }));
-        this.routes = Object.fromEntries(routeEntries.filter(([, route]) => route));
+        if (page === this.page) this.routes = Object.fromEntries(routeEntries.filter(([, route]) => route));
         if (period === this.period) {
           this.usage = usage;
           this.comparison = range && this.comparisonCache?.key === `${this.base}|${range}`
@@ -327,25 +354,28 @@ export default class MagpieLive extends View {
           this.chartError = this.chartUsage ? "" : "走势数据暂不可用";
         }
         this.quotas = quota.data ?? [];
-        this.active = active.active ?? [];
+        if (page === this.page) this.active = active.active ?? [];
+        if (!this.active.length) this.motionView.set_props({ paths: [], start: this.motionStart });
         this.history = history?.data ?? this.history;
         this.error = "";
         this.readAt = Date.now();
         if (this.page === "usage") this.readStatus.set_props({ readAt: this.readAt });
       } catch (error) {
-        this.error = error instanceof Error ? error.message : "Magpie 暂不可用";
+        if (page === this.page) this.error = error instanceof Error ? error.message : "Magpie 暂不可用";
       } finally {
         this.reading = false;
         this.notifyData(next);
-        if (period !== this.period || granularity !== this.chartGranularity) this.refresh(next);
+        if (period !== this.period || granularity !== this.chartGranularity || page !== this.page) this.refresh(next);
       }
     });
   }
 
   setPage(page, cx) {
+    if (page === this.page) return;
     this.page = page;
     preferences.setItem("magpie-live.page", page);
     if (page === "usage") this.readStatus.set_props({ readAt: this.readAt });
+    this.refresh(cx);
     cx.notify();
   }
 
@@ -674,9 +704,21 @@ export default class MagpieLive extends View {
         return program?.icon ? (program.tint ? svg(program.icon).text_color(t.muted) : image(program.icon)).size(12).flex_none()
           : svg("icons/program.svg").size(12).flex_none().text_color(t.dim);
       };
-      const graph = () => div().relative().w(stageWidth).h(stageHeight).bg(t.surface)
+      const graph = () => {
+        const currentActive = active.some(current);
+        this.motionWidth = stageWidth;
+        this.motionHeight = stageHeight;
+        this.motionPaths = active.map((request, i) => ({
+          id: `flow-${request.route_id ?? i}-${i}`,
+          fromX: edge, fromY: nodeY(sourceNames, sourceNames.indexOf(sourceKey(request))),
+          middle, midLeftY: hubY, midRightY: hubY,
+          toX: stageWidth - edge, toY: nodeY(providerNames, providerNames.indexOf(provider(request))),
+          color: sessionColor(request), current: current(request), dimmed: currentActive && !current(request),
+        }));
+        return div().relative().w(stageWidth).h(stageHeight).bg(t.surface)
         .children(sourceNames.map((name, i) => line(edge, nodeY(sourceNames, i), middle, hubY, t.muted)))
         .children(providerNames.map((name, i) => line(middle, hubY, stageWidth - edge, nodeY(providerNames, i), t.muted)))
+        .child(this.motionView)
         .children(sourceNames.map((name, i) => h_flex().absolute().left(14).top(nodeY(sourceNames, i) - nodeHeight / 2).w(76).h(nodeHeight).px(5).gap(3).items_center().rounded(4).bg(t.raised).tooltip(name)
           .child(icon(name)).child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(name))))
         .children(providerNames.map((name, i) => {
@@ -689,6 +731,7 @@ export default class MagpieLive extends View {
         .when(!active.length, view => view.child(div().absolute().left(0).right(0).top(12).flex().justify_center().child(text("当前没有活动路由", t.dim, 10))))
         .child(div().absolute().left(middle - hubHeight / 2).top(hubY - hubHeight / 2).w(hubHeight).h(hubHeight).rounded_full().bg(t.surface).flex().items_center().justify_center()
           .child(svg("mods/magpie-live/magpie.svg").size(17).text_color(t.muted)));
+      };
       const sessionId = currentSession || active[0]?.session || requests[0]?.session;
       const session = (usage?.sessions ?? []).find((item) => item.id === sessionId);
       const promptTokens = session ? (session.input || 0) + (session.cache_read || 0) + (session.cache_write || 0) : 0;
@@ -768,6 +811,7 @@ export default class MagpieLive extends View {
           .when(!currentRoutes.length && (currentSession || !active.length), body => body.child(v_flex().gap(5).p(10).rounded(8).bg(currentSession ? t.selected : light ? t.raised : t.surface)
             .when(Boolean(currentSession), card => card.border(1).border_color(t.border))
             .child(h_flex().items_center().gap(6)
+              .child(icon(session?.agent || focusedType || "Agent"))
               .child(div().flex_1().min_w(0).truncate().text_size(9).text_color(t.muted).child(sessionId ? `${session?.agent || focusedType || "Agent"} · ${sessionId.slice(-8)}` : "尚无会话"))
               .when(Boolean(currentSession && focusTerminal), row => row.child(text(focusTerminal, t.working, 9)))
               .child(text(currentSession ? "当前会话" : "最近会话", currentSession ? t.accent : t.dim, 9)))

@@ -13,8 +13,10 @@ export default class EdgeDrawer extends View {
     this.overlayKey = `edge-drawer.${shared("layout")}.${(props() ?? {}).target}`;
     this.overlay = shared(this.overlayKey) ?? null;
     this.close();
+    this.targetHidden = Boolean(find(layout(), (props() ?? {}).target)?.hidden);
     cx.timer.every(POINTER_INTERVAL, next => {
       if (this.overlay || !globalThis.window.is_window_active()) return;
+      if (!this.targetHidden) return;
       const viewport = globalThis.window.viewport_size();
       const pointer = globalThis.window.mouse_position();
       const width = TRIGGER_WIDTH * (settings().zoom ?? 1);
@@ -37,6 +39,7 @@ export default class EdgeDrawer extends View {
   }
 
   open(cx) {
+    if (!globalThis.window.is_window_active()) return;
     const p = props() ?? {};
     const target = find(layout(), p.target);
     if (!target?.hidden || this.overlay) return;
@@ -79,6 +82,7 @@ export default class EdgeDrawer extends View {
   }
 
   render() {
+    this.targetHidden = Boolean(find(layout(), (props() ?? {}).target)?.hidden);
     return div().id(`edge-drawer-${(props() ?? {}).id ?? "edge"}`).size_full()
       .on_hover((hovered, cx) => { if (hovered) this.open(cx); });
   }

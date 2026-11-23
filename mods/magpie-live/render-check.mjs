@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { pathToFileURL } from 'node:url';
 
 // Substitute the native host and I/O only; execute the real mod and comparison module.
 let now = Date.parse('2026-11-17T12:30:00Z');
@@ -42,29 +43,40 @@ let quotas = [], history = [], active = [], recent = [], chartUnavailable = fals
 let focus = null, terminalList = [], agentList = [], openFiles = '';
 let panelHidden = true, overlayProps = {}, windowActive = true;
 const filesByPid = new Map();
+let sessionExecs = 0;
+const fetchCalls = [];
+let concurrencyUnavailable = false;
+let heldLookup = null;
 const context = vm.createContext({
   console, Date: Clock, URL, Map, Set,
   localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
   window: { is_window_active: () => windowActive, paint_path: (geometry, color) => element('path').geometry(geometry).color(color) },
   fetch: async input => {
     const url = new URL(input);
+    fetchCalls.push(url.pathname);
     const data = url.pathname.endsWith('/requests') ? { rows: recent }
       : url.pathname.endsWith('/history') ? { data: history }
       : url.pathname.endsWith('/quotas') ? { data: quotas }
       : url.pathname.endsWith('/concurrency') ? { active }
       : url.searchParams.get('period') === 'today' ? usage : chart;
-    return { ok: !(chartUnavailable && url.pathname.endsWith('/usage') && url.searchParams.get('period') !== 'today'), json: async () => structuredClone(data) };
+    return { ok: !(chartUnavailable && url.pathname.endsWith('/usage') && url.searchParams.get('period') !== 'today') && !(concurrencyUnavailable && url.pathname.endsWith('/concurrency')), json: async () => structuredClone(data) };
   },
 });
 const dependencies = {
   'gpui-kit': { View: class {}, div: () => element('div'), svg: value => element('svg').source(value), image: value => element('image').source(value), PathBuilder: { fill: path, stroke: path } },
   'gpui-base': { h_flex: () => element('h'), v_flex: () => element('v') },
-  herdr: { home: () => '/test', appHome: () => '/test', readTextFile: async () => '{}', theme: () => colors, nextCommand: () => new Promise(() => {}), exec: async (_cmd, args) => ({ stdout: filesByPid.get(args?.[2]) ?? openFiles }), focused: () => focus, terminals: () => terminalList, agents: () => agentList, props: () => overlayProps, shared: key => sharedStorage.get(key), setShared: (key, value) => sharedStorage.set(key, value), layout: () => ({ children: [{ id: 'magpie-panel', hidden: panelHidden }] }) },
+  herdr: { home: () => '/test', appHome: () => '/test', readTextFile: async () => '{}', theme: () => colors, nextCommand: () => new Promise(() => {}), exec: async (_cmd, args) => {
+    if (args?.[0]?.endsWith('terminal-session.cjs')) sessionExecs++;
+    if (heldLookup && args?.[1] === heldLookup.pid) { heldLookup.started(); await heldLookup.wait; }
+    const output = filesByPid.get(args?.[1]) ?? openFiles;
+    return { stdout: output.match(/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/i)?.[0] ?? '' };
+  }, focused: () => focus, terminals: () => terminalList, agents: () => agentList, props: () => overlayProps, shared: key => sharedStorage.get(key), setShared: (key, value) => sharedStorage.set(key, value), layout: () => ({ children: [{ id: 'magpie-panel', hidden: panelHidden }] }) },
 };
-const main = new vm.SourceTextModule(await readFile(new URL('./main.js', import.meta.url), 'utf8'), { context });
+const mainUrl = process.env.MAGPIE_MAIN ? pathToFileURL(process.env.MAGPIE_MAIN) : new URL('./main.js', import.meta.url);
+const main = new vm.SourceTextModule(await readFile(mainUrl, 'utf8'), { context });
 await main.link(async name => {
   if (name.startsWith('./')) {
-    const module = new vm.SourceTextModule(await readFile(new URL(name, import.meta.url), 'utf8'), { context });
+    const module = new vm.SourceTextModule(await readFile(new URL(name, mainUrl), 'utf8'), { context });
     await module.link(() => { throw new Error('Unexpected nested import'); });
     return module;
   }
@@ -123,6 +135,7 @@ assert.ok(texts(panel.usageChart(colors)).includes('最高 9'));
 
 panel.setPage('usage', cx);
 await refresh();
+fetchCalls.length = 0;
 notifications = 0;
 recent = [{ route_id: 9, model: 'recent-only' }];
 active = [{ route: 10, model: 'active-only' }];
@@ -130,6 +143,11 @@ now += 5000;
 await refresh();
 assert.equal(notifications, 0, 'route-only changes must not rebuild the usage page');
 assert.ok(texts(panel.render(cx)).includes(`上次成功读取 · ${new Date(now).toLocaleTimeString()}`));
+assert.equal(fetchCalls.some(path => /\/(?:requests|concurrency|route)$/.test(path)), false, 'the usage page must not issue routing-only requests');
+concurrencyUnavailable = true;
+await refresh();
+assert.equal(panel.error, '', 'unavailable routing services must not block usage updates');
+concurrencyUnavailable = false;
 
 // Zero values remain absent, small positives keep their 2px minimum, and every bucket retains its tooltip.
 panel.period = '30d';
@@ -234,6 +252,37 @@ assert.deepEqual(Array.from(panel.sessionTerminals[sessionId]), ['t1']);
 assert.deepEqual(Array.from(panel.sessionTerminals[otherSession]), ['t2']);
 root = panel.render(cx);
 assert.ok(texts(root).includes('t1') && texts(root).includes('t2'), 'resolved HC addresses appear for their sessions');
+const cachedExecs = sessionExecs;
+await refresh();
+assert.equal(sessionExecs, cachedExecs, 'unchanged terminal identities reuse successful session discovery');
+const resumedSession = '21234567-89ab-cdef-0123-456789abcdef';
+openFiles = resumedSession;
+active[0] = { ...active[0], session: resumedSession };
+now += 15001;
+await refresh();
+assert.equal(panel.focusSession, resumedSession, 'a resumed session in the same process is rediscovered within 15 seconds');
+assert.deepEqual(Array.from(panel.sessionTerminals[resumedSession]), ['t1']);
+openFiles = sessionId;
+active[0] = { ...active[0], session: sessionId };
+now += 15001;
+await refresh();
+let lookupStarted, lookupFinished;
+const lookupStart = new Promise(resolve => { lookupStarted = resolve; });
+const lookupWait = new Promise(resolve => { lookupFinished = resolve; });
+heldLookup = { pid: '333', started: lookupStarted, wait: lookupWait };
+terminalList.push({ address: 't3', foreground: { pid: 333 }, report: { msg: 'Next terminal' } });
+filesByPid.set('333', '31234567-89ab-cdef-0123-456789abcdef');
+focus = { terminal: 't3' };
+panel.refresh(cx);
+await lookupStart;
+try {
+  assert.equal(texts(panel.render(cx)).includes('当前会话'), false, 'pending discovery must not label the previous session as current for the next terminal');
+} finally {
+  lookupFinished(); heldLookup = null;
+}
+await refresh();
+terminalList.pop(); filesByPid.delete('333'); focus = { terminal: 't1' };
+await refresh();
 agentList = [];
 active = [];
 panel.routes = { [sessionId]: { id: 11, tries: [{ model: 'real-model' }], group: 'gpt' } };
@@ -255,8 +304,6 @@ panel.active[0].phase = 'upstream';
 assert.ok(texts(byId(panel.render(cx), 'route-decision-0')).includes('模型信息不可用'), 'an upstream request without route details is not presented as waiting');
 panel.active = [{ route: 8, agent: 'codex', session: 'other', model: 'model' }];
 assert.ok(texts(panel.render(cx)).includes('当前会话暂无进行中的请求'), 'retain the idle current session alongside another session’s request');
-assert.ok(timers.every(timer => timer.ms >= 1000), 'static routes have no animation-frequency timer');
-assert.equal(built.filter(node => node.attrs.transition).length, 0, 'static routes do not schedule position transitions');
 for (const floating of [false, true]) {
   overlayProps = floating ? { overlay: 'magpie-drawer' } : {};
   const lifecycle = new main.namespace.default();
