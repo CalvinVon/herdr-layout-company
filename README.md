@@ -2,6 +2,8 @@
 
 Herdr App 的 `office` 和 `agent-columns` 布局快照，包含布局、预览图、主题和所需 mod。`agent-columns` 与 `office` 共用侧栏、顶部标签栏、Files、Editor 和 Magpie 窗格，省略办公室场景。
 
+浅色主题使用 `macos-light`：雾灰色窗口框架、白色内容面、系统蓝选中态，以及浅色标签和 Magpie 卡片的细边框与轻投影。`office` 与 `agent-columns` 共用主题；深色继续使用 Atom One Dark。状态色由各自主题提供，浅色终端的 ANSI 色与小字号状态文字使用更深的配色以保持可读性。安装时需同时复制 `themes/` 中的两个主题文件。
+
 Office 场景按整体缩放比例适配容器，与工作区之间不额外留垂直内边距；工作区保留水平边距和窗格间距。新建会话的工作目录列表独立滚动，不带动外层页面。
 
 Office 的二维码按矩阵和显示尺寸复用不可变原生 Path；人物配色沿用工位状态，切换焦点时不重复生成。每次渲染仍创建新的元素。回归检查：`node mods/agent-office/qr-render-check.cjs`、`node mods/agent-office/self-check.cjs` 和 `herdr-app check mods/agent-office`。
@@ -10,9 +12,15 @@ Office 的二维码按矩阵和显示尺寸复用不可变原生 Path；人物�
 
 布局包含 Magpie 窗格，可通过顶部 Magpie 图标显示或隐藏。窗格连接本机 Magpie 网关，展示路由、额度和用量；总览随浅色或深色主题调整样式，区块可拖动手柄排序、固定或隐藏，已隐藏区块可从顶部恢复；额度卡片用进度条、百分比和配速展示各窗口，并可排序、隐藏，设置保存在本地。
 
+流光的缓存子视图根节点显式占满行区域，外层覆盖层固定在行的左上角，避免独立根布局时仅依赖绝对定位四边而丢失绘制尺寸。
+
 Magpie 隐藏区块按需构建，用量页只读取用量、额度和历史；切回总览立即补刷路由。成功的本地会话识别最多复用 15 秒，进程或报告身份变化立即失效，未识别结果继续重试。走势图和额度派生按数据、时间桶与尺寸更新；保留原有路由动效、逐点提示和固定/浮层设置同步。Office 失活时暂停常规采集，恢复后由 500ms 检查补刷，显式操作仍可执行；总览广播不包含 Agent 标题。稳定项目根的常规 worktree 检查间隔为 30 秒，显式项目操作沿用即时校验；隐藏固定侧栏和失活窗口不运行展示计时器，独立项目协调器继续处理请求。
 
 顶部工具栏可在“插入”和“悬浮”之间切换 Files、Changes 和 Editor 的显示方式；已打开的面板随模式切换继续显示，Files 保留当前文档与预览/源码状态，Changes 保留 History 选择，Editor 沿用同一个终端。悬浮窗口默认居中，只能从标题栏拖动，内容区保留原生文字选择和复制。关闭窗格后，顶部按钮同步取消高亮，再次点击即可重新打开。
+
+Files 支持文档内查找：`⌘F`（`keys.json` 的 `global` 绑定 `files-markdown.find`）或标题栏“查找”打开查找栏。Markdown 预览按渲染后的正文匹配，源码按编辑器内容匹配；输入查询、`↑`/`↓` 或 Enter/Shift+Enter 都由原生组件高亮并滚动到当前匹配项，预览异步解析时显示“正在定位”。`×` 关闭并清除高亮；切换文件会关闭查找。此版本需要提供 `TextViewState.markdown()`、`TextView.new()` 和 `EditorState.search()` 的 Herdr 原生构建，先更新原生程序再安装此 mod。回归检查：`node mods/files-markdown/find-check.cjs`、`node mods/files-markdown/selection-check.cjs`。
+
+Files 通过 `nextCommand()` 接收 `files-markdown.find`；仅配置快捷键不足以打开查找栏。重复调用会重新聚焦当前查找框。
 
 标题栏拖动使用 Herdr 原生窗口的 `drag_handle` 接口。使用 Herdr v0.1.13 源码时，可将 [原生补丁](docs/herdr-v0.1.13-title-drag.patch) 应用到源码根目录，然后重新构建 Herdr。
 
@@ -35,5 +43,5 @@ Magpie 本地检查：`node --experimental-vm-modules mods/magpie-live/render-ch
 复制下面的提示词：
 
 ```text
-请从 https://github.com/CalvinVon/herdr-layout-company 安装 office 布局到我的 Herdr App：先检查我的 Herdr 版本和配置目录，备份将被覆盖的同名布局、主题及 mod，再安装仓库中的对应文件，保留我的会话和项目数据；检查 mod 是否能够加载，切换到 office 布局并验证运行状态，最后告诉我如何恢复备份及任何兼容性问题。
+请从 https://github.com/CalvinVon/herdr-layout-company 安装 office 布局到我的 Herdr App：先检查我的 Herdr 版本、配置目录，以及原生构建是否支持 Entity.cached()、兄弟视图缓存复用、TextViewState.markdown()、TextView.new() 和 EditorState.search()；缺少接口时先报告兼容性缺口，不覆盖正在使用的侧栏或 Files。兼容时备份将被覆盖的同名布局、主题及 mod，再安装仓库中的对应文件，保留我的会话和项目数据；检查 mod 是否能够加载，切换到 office 布局并验证运行状态，最后告诉我如何恢复备份及任何兼容性问题。
 ```

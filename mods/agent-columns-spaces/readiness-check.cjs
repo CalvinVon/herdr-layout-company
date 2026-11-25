@@ -58,7 +58,8 @@ function harness({ machine = null, saved = fixture(machine), readFailure, failRe
     notify: warning => warnings.push(warning), closeOverlay: () => {}, window: () => ({ platform: 'macos' }),
     nextCommand: () => new Promise(() => {}),
   };
-  const { SpacesTabs } = load('main.js', 'SpacesTabs', api);
+  const retained = load('retained-parts.js', 'RetainedParts', { View: api.View, div: api.div });
+  const { SpacesTabs } = load('main.js', 'SpacesTabs', { ...api, ...retained });
   const { NewMenu } = load('../agent-columns-new-menu/main.js', 'NewMenu', api);
   const cx = { spawn: task => pending.push(Promise.resolve().then(() => task(cx))), notify() {}, sleep: async () => {},
     timer: { every: (ms, callback) => timers.push({ ms, callback }) },

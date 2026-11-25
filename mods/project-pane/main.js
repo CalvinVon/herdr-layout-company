@@ -83,6 +83,8 @@ export default class Pane extends View {
   render(cx) {
     if (props()?.moveMenu) return this.renderMoveMenu();
     const t = theme();
+    const surface = t.surface.replace(/^#/, "");
+    const light = (parseInt(surface.slice(0, 2), 16) * 299 + parseInt(surface.slice(2, 4), 16) * 587 + parseInt(surface.slice(4, 6), 16) * 114) / 1000 > 160;
     const p = this.me();
     if (!p || p.mod === "space-home") return div();
     const title = (p.title || "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
@@ -102,9 +104,9 @@ export default class Pane extends View {
       .px(10)
       .gap(8)
       .items_center()
-      .bg(p.focused ? t.background : t.chrome)
-      .border_b(1)
-      .border_color(p.focused ? t.border : t.chrome)
+      .bg(st === "blocked" ? t.blocked + (p.focused ? "33" : "1a") : p.focused ? light ? t.surface : t.background : t.chrome)
+      .border_b(st === "blocked" ? 2 : 1)
+      .border_color(st === "blocked" ? (p.focused ? t.accent : t.blocked) : p.focused ? t.border : t.chrome)
       .text_size(12)
       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
       .on_click(event => { run("pane.focus", { pane }); if (event.click_count === 2) run("pane.zoom", { pane }); })
@@ -115,7 +117,7 @@ export default class Pane extends View {
         .tooltip(terminal.parent ? `子 Agent · 父级：${parent?.title || terminal.parent} (${terminal.parent})` : `主 Agent · ${terminal.address}`)
         .child(svg(`mods/agent-columns-spaces/agent-chat-${terminal.parent ? "worker" : "lead"}.svg`).size(14).text_color(terminal.parent ? t.muted : t.accent))))
       .when(Boolean(isAgent && p.terminal), el => el.child(div().id(`copy-pane-id-${pane}`).flex_none().text_color(t.working).cursor_pointer().tooltip(`点击复制 ${p.terminal}`).on_mouse_down("left", (_event, cx) => cx.stop_propagation()).on_mouse_up("left", (_event, cx) => cx.stop_propagation()).on_click((_event, cx) => { cx.stop_propagation(); cx.write_to_clipboard(p.terminal); }).child(p.terminal)))
-      .child(div().flex_none().truncate().max_w(360).font_medium().text_color(t.foreground).tooltip(name).child(name))
+      .child(div().flex_none().truncate().max_w(360).font_medium().when(st === "blocked", el => el.font_semibold()).text_color(t.foreground).tooltip(name).child(name))
       .child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd)))
       .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
       .when(this.hovered, el => el

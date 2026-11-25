@@ -155,6 +155,8 @@ export default class Tabs extends View {
 
   render(cx) {
     const t = theme();
+    const surface = t.surface.replace(/^#/, "");
+    const light = (parseInt(surface.slice(0, 2), 16) * 299 + parseInt(surface.slice(2, 4), 16) * 587 + parseInt(surface.slice(4, 6), 16) * 114) / 1000 > 160;
     const space = spaces().find(p => p.active);
     const all = panes();
     const shown = (space?.tabs ?? []).filter(tab => {
@@ -176,7 +178,9 @@ export default class Tabs extends View {
       const status = labels[c.id]?.status ?? c.status;
       return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
         .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
-        .hover(s => s.bg(t.hover))
+        .when(light, el => el.rounded(9).border_color(c.active ? t.border : t.chrome + "00"))
+        .when(light && c.active, el => el.shadow_xs())
+        .hover(s => s.bg(light && c.active ? t.raised : t.hover))
         .tooltip(name)
         .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); this.pressed = i; if (e.click_count === 2) run("tab.rename", { id: c.id }); })
         .on_mouse_up("left", () => {
@@ -243,7 +247,7 @@ export default class Tabs extends View {
     const panelButton = (id, label, icon) => {
       const on = this.panelMode === "floating" ? floating?.panel === id : panel && !panel.hidden && body?.active === id;
       return h_flex().id(`panel-${id}`).h(26).px(8).gap(5).flex_none().items_center().rounded(6)
-        .text_size(12).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
+        .text_size(12).bg(on ? t.selected : t.chrome).text_color(on ? light ? t.accent : t.foreground : t.muted)
         .hover(s => s.bg(t.hover)).tooltip(id === "editor" && this.editorLayoutError ? this.editorLayoutError : label).on_mouse_down("left", stop)
         .on_click(() => {
           if (id === "editor") this.editorLayoutError = null;

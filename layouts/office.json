@@ -303,14 +303,8 @@
   ],
   "background": "canvas",
   "theme": {
-    "light": "paper",
+    "light": "macos-light",
     "dark": "atom-one-dark"
-  },
-  "colors": {
-    "blocked": "#f97316",
-    "done": "#22c55e",
-    "idle": "#22c55e",
-    "working": "#3b82f6"
   },
   "terminal_padding": [
     14,

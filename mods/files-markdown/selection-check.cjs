@@ -21,11 +21,12 @@ let target = {};
 const values = new Map();
 const environment = {
   View: class {}, div: element, svg: element, v_flex: element, h_flex: element,
-  Editor: { new: element }, TextView: { markdown: (id, text) => element().id(id).child(text) },
+  Editor: { new: element }, TextView: { new: () => element() },
   spaces: () => [{ id: "s1", active: true, folder: "/repo" }],
   focused: () => ({ pane: "p1", terminal: "t1" }), panes: () => [{ pane: "p1", cwd: "/repo" }],
   props: () => target, theme: () => ({}), shared: key => values.get(key), setShared: (key, value) => values.set(key, value), closeOverlay() {},
   readTextFile: async () => "# 技术方案\n正文内容", settings: () => ({}), EditorState: { new: () => ({ release() {} }) },
+  TextViewState: { markdown: () => ({ on() {}, release() {} }) },
 };
 const source = fs.readFileSync(process.env.FILES_SOURCE || path.join(__dirname, "main.js"), "utf8")
   .replace(/^import .*;\n/gm, "").replace("export default class Files", "class Files");
@@ -47,7 +48,7 @@ for (const mode of source.includes("this.publication") ? ["inline", "floating", 
   const viewer = new Files();
   Object.assign(viewer, {
     context: { key: JSON.stringify({ cwd: "/repo", on: null, space: "s1" }) },
-    root: "/repo", file: "plan.md", code: {}, preview: true, markdown: "# 技术方案\n正文内容",
+    root: "/repo", file: "plan.md", code: {}, document: {}, preview: true, markdown: "# 技术方案\n正文内容",
     publication: mode === "publication" ? { path: "/repo/plan.md", on: null } : null,
   });
   const rendered = viewer.render({});
@@ -68,7 +69,7 @@ async function checkModeTransfer() {
       target = { floating: mode === "floating" };
       values.set("project-tabs.panel-mode", mode);
       values.set("files-markdown.restore", { mode, context: context.key, file, preview: false });
-      const viewer = Object.assign(new Files(), { context, root: "/repo", file: "old.md", code: { release() {} }, markdown: "旧文档", preview: true, entries: new Map(), folders: new Set(), marks: {} });
+      const viewer = Object.assign(new Files(), { context, root: "/repo", file: "old.md", code: { release() {} }, document: { release() {} }, markdown: "旧文档", preview: true, entries: new Map(), folders: new Set(), marks: {} });
       const tasks = [];
       viewer.render({ notify() {}, spawn(fn) { tasks.push(fn({ notify() {} })); } });
       await Promise.all(tasks);

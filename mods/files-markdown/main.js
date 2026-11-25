@@ -1,7 +1,7 @@
 // A lazy file browser for the focused pane's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, TextView } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, shared, setShared, notify, props } from "herdr";
+import { v_flex, h_flex, Editor, EditorState, TextView, TextViewState, Input, InputState } from "gpui-base";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, shared, setShared, notify, props, nextCommand } from "herdr";
 
 function location() {
   const space = spaces().find(s => s.active), f = focused();
@@ -42,6 +42,11 @@ export default class Files extends View {
   init(_props, cx) {
     this.saved = new Map();
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
+    this.text = null; this.find = null; this.document = null;
+    this.search = InputState.new({ placeholder: "查找文件内容" });
+    this.search.on("change", (_event, cx) => { this.findDocument(); cx.notify(); });
+    this.search.on("submit", (event, cx) => { this.stepFind(event.shift ? -1 : 1); cx.notify(); });
+    cx.spawn(async cx => { for (;;) { if (await nextCommand() === "find") this.openFind(cx); } });
     this.refresh(cx);
     cx.timer.every(10000, cx => this.refresh(cx));
   }
@@ -128,7 +133,8 @@ export default class Files extends View {
   }
 
   show(path, cx) {
-    this.code?.release(); this.code = null; this.file = path; this.fileError = null; this.markdown = null; this.preview = true;
+    this.code?.release(); this.code = null; this.file = path; this.fileError = null; this.markdown = null; this.preview = true; this.text = null; this.find = null;
+    this.document?.release(); this.document = null;
     if (!path || !cx) return;
     const context = this.context, root = this.root, on = this.on;
     cx.spawn(async cx => {
@@ -139,7 +145,16 @@ export default class Files extends View {
         if (text.includes("\0")) { this.fileError = "Binary file · no text preview"; return; }
         const t = theme(), ext = path.includes(".") ? path.split(".").pop().toLowerCase() : "txt";
         const value = text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text;
-        if (ext === "md") this.markdown = value;
+        this.text = value;
+        if (ext === "md") {
+          this.markdown = value;
+          const document = this.document = TextViewState.markdown(value);
+          document.on("search", (status, cx) => {
+            if (this.document !== document || !this.find || !this.preview || status.query !== this.query()) return;
+            this.find = status;
+            cx.notify();
+          });
+        }
         this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: true,
           value,
           font_family: settings().font_family, font_size: 12,
@@ -147,6 +162,34 @@ export default class Files extends View {
       } catch { if (this.file === path && this.current(context)) this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; }
       finally { cx.notify(); }
     });
+  }
+
+  query() {
+    return this.find ? this.search.value().trim() : "";
+  }
+
+  findDocument(index = 0) {
+    if (!this.find) return;
+    const document = this.preview && this.document ? this.document : this.code;
+    if (document) this.find = document.search(this.query(), index);
+  }
+
+  openFind(cx) {
+    if (!this.file || typeof this.text !== "string") return;
+    if (!this.find) { this.find = { index: 0 }; this.findDocument(); }
+    this.search.focus();
+    cx.notify();
+  }
+
+  stepFind(delta) {
+    if (!this.find) return;
+    this.findDocument(this.find.index + delta);
+  }
+
+  closeFind() {
+    this.find = null;
+    this.code?.search("");
+    this.document?.search("");
   }
 
   openExternal(cx) {
@@ -219,16 +262,26 @@ export default class Files extends View {
       if (previous?.context !== current.context || previous?.file !== current.file || previous?.preview !== current.preview) setShared("files-markdown.current", current);
     }
     const t = theme();
+    const query = this.query();
+    const count = !query ? "输入以查找" : this.find.pending ? "正在定位…" : this.find.count ? `${this.find.index + 1} / ${this.find.count}` : "无匹配";
     return v_flex().id("files").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
         .when(Boolean(this.file), el => el.child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←")))
         .child(div().font_semibold().child("Files"))
         .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(this.file ?? this.root?.split(/[\\/]/).pop() ?? ""))
-        .when(this.markdown !== null && this.markdown !== undefined, el => el.child(div().id("files-markdown-toggle").cursor_pointer().px(7).py(3).rounded(5).text_size(12).text_color(t.muted).hover(s => s.bg(t.hover)).on_click((_e, cx) => { this.preview = !this.preview; cx.notify(); }).child(this.preview ? "源码" : "预览")))
+        .when(typeof this.text === "string", el => el.child(div().id("files-find-toggle").cursor_pointer().px(7).py(3).rounded(5).text_size(12).text_color(this.find ? t.accent : t.muted).tooltip("查找（⌘F）").hover(s => s.bg(t.hover)).on_click((_e, cx) => this.openFind(cx)).child("查找")))
+        .when(this.markdown !== null && this.markdown !== undefined, el => el.child(div().id("files-markdown-toggle").cursor_pointer().px(7).py(3).rounded(5).text_size(12).text_color(t.muted).hover(s => s.bg(t.hover)).on_click((_e, cx) => { this.preview = !this.preview; this.code.search(""); this.document.search(""); this.findDocument(); cx.notify(); }).child(this.preview ? "源码" : "预览")))
         .when(Boolean(this.root) && !this.on, el => el.child(div().id("files-open-external").cursor_pointer().px(7).py(3).rounded(5).text_size(12).text_color(t.muted).tooltip("Open in default application").accessibility_label("Open in default application").hover(s => s.bg(t.hover)).on_click((_e, cx) => this.openExternal(cx)).child("↗"))))
+      .when(Boolean(this.find), el => el.child(v_flex().id("files-find").flex_none().gap(5).px(10).py(7).border_b(1).border_color(t.border)
+        .child(h_flex().gap(6).items_center()
+          .child(Input.new(this.search).flex_1().min_w(0).h(26).px(8).rounded(6).border_1().border_color(t.border).bg(t.background).text_color(t.foreground).text_size(12))
+          .child(div().id("files-find-count").flex_none().text_size(11).text_color(this.find.count || this.find.pending || !query ? t.muted : t.blocked).child(count))
+          .child(div().id("files-find-prev").size(22).flex().items_center().justify_center().rounded(4).cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover)).on_click((_e, cx) => { this.stepFind(-1); cx.notify(); }).child("↑"))
+          .child(div().id("files-find-next").size(22).flex().items_center().justify_center().rounded(4).cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover)).on_click((_e, cx) => { this.stepFind(1); cx.notify(); }).child("↓"))
+          .child(div().id("files-find-close").size(22).flex().items_center().justify_center().rounded(4).cursor_pointer().text_color(t.muted).hover(s => s.bg(t.hover)).on_click((_e, cx) => { this.closeFind(); cx.notify(); }).child("×")))))
       .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6).children(this.rows("", 0, [], t))
         .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "No folder"))))
         .when(this.limited, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("File list limited to 500 entries per folder and 5,000 total")))))
-      .when(Boolean(this.file), el => el.child(this.code ? (this.preview && this.markdown !== null ? v_flex().id("files-markdown-preview").flex_1().min_h(0).overflow_y_scrollbar().p(12).child(TextView.markdown("files-markdown-text", this.markdown).selectable().on_link_click((url, cx) => this.openLink(url, cx))) : Editor.new(this.code).flex_1().min_h(0)) : div().p(12).text_color(t.dim).child(this.fileError || "Loading file…")));
+      .when(Boolean(this.file), el => el.child(this.code ? (this.preview && this.document ? v_flex().id("files-markdown-preview").flex_1().min_h(0).overflow_hidden().p(12).child(TextView.new(this.document).id("files-markdown-text").size_full().scrollable(true).selectable().on_link_click((url, cx) => this.openLink(url, cx))) : Editor.new(this.code).flex_1().min_h(0)) : div().p(12).text_color(t.dim).child(this.fileError || "Loading file…")));
   }
 }

@@ -629,16 +629,18 @@ export default class MagpieLive extends View {
     const light = surface.length >= 6 && (parseInt(surface.slice(0, 2), 16) * 299 + parseInt(surface.slice(2, 4), 16) * 587 + parseInt(surface.slice(4, 6), 16) * 114) / 1000 > 160;
     const usage = this.usage;
     const tab = (id, label) => div().id(`magpie-tab-${id}`).px(10).py(6).rounded(6)
-      .bg(this.page === id ? t.selected : t.surface)
-      .text_color(this.page === id ? t.foreground : t.muted).text_size(11)
+      .bg(light ? this.page === id ? t.raised : t.hover : this.page === id ? t.selected : t.surface)
+      .when(light && this.page === id, el => el.shadow_xs())
+      .text_color(this.page === id ? light ? t.accent : t.foreground : t.muted).text_size(11)
       .on_click((_e, next) => this.setPage(id, next)).child(label);
     const heading = (label, value) => h_flex().justify_between().items_center()
       .child(text(label, t.foreground, 12).font_semibold()).child(text(value, t.dim, 10));
     const header = h_flex().justify_between().items_center().px(12).py(10).border_b(1).border_color(t.border)
+      .when(light, el => el.bg(t.chrome))
       .child(h_flex().gap(5).items_center().child(div().size(7).rounded_full().bg(this.error ? t.blocked : this.readAt ? t.done : t.dim))
         .child(text("Magpie", t.foreground, 13).font_semibold())
         .child(text(this.base.replace("http://127.0.0.1:", "127.0.0.1:"), t.dim, 9)))
-      .child(h_flex().gap(3).p(3).rounded(8).bg(t.raised).children([tab("routing", "总览"), tab("usage", "用量")]));
+      .child(h_flex().gap(3).p(3).rounded(8).bg(light ? t.hover : t.raised).children([tab("routing", "总览"), tab("usage", "用量")]));
 
     if (this.page === "routing") {
       const active = this.active.map((request) => ({ ...request, route_id: request.route, t: request.started, req: request.model, live: true }));
@@ -833,7 +835,7 @@ export default class MagpieLive extends View {
         const section = sections.find((item) => item.id === id);
         const fixed = this.pinnedSections.includes(id);
         return v_flex().id(`overview-section-${id}`).relative().p(10).bg(t.surface)
-          .when(light, card => card.rounded(10))
+          .when(light, card => card.rounded(12).bg(t.raised).border(1).border_color(t.border).shadow_xs())
           .when(!light, card => card.border_b(1).border_color(t.border))
           .when(this.draggingSection, card => card.cursor_grabbing())
           .on_hover((hovered, next) => { const current = hovered ? id : this.hoveredSection === id ? null : this.hoveredSection; if (current !== this.hoveredSection) { this.hoveredSection = current; next.notify(); } })
@@ -880,7 +882,7 @@ export default class MagpieLive extends View {
       };
       const visible = order.filter((id) => !this.hiddenSections.includes(id));
       const pinned = visible.filter((id) => this.pinnedSections.includes(id));
-      return v_flex().id("magpie-live-root").size_full().min_h(0).bg(light ? t.raised : t.surface)
+      return v_flex().id("magpie-live-root").size_full().min_h(0).bg(t.surface)
         .on_hover((hovered, next) => { if (!hovered && this.pressedSection) { this.pressedSection = null; this.overSection = null; this.draggingSection = false; next.notify(); } })
         .on_mouse_up("left", (_event, next) => { if (this.pressedSection) { this.pressedSection = null; this.overSection = null; this.draggingSection = false; next.notify(); } })
         .on_size_change((size, next) => { if (this.width !== size.width || this.height !== size.height) { this.width = size.width; this.height = size.height; next.notify(); } })
