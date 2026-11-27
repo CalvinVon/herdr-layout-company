@@ -113,14 +113,14 @@ export default class Board extends View {
     this.search = InputState.new({ placeholder: "Search agents…" });
     this.search.on("change", (_e, cx) => { setShared("agent-columns.filter", this.search.value()); cx.notify(); });
     cx.timer.every(1000, (cx) => {
-      if (!props()?.role && globalThis.window.is_window_active()) {
+      if (!props()?.role && globalThis.window.is_window_active() && !blockCollapsed("agents") && (props()?.overlay || !node(layout(), "sidebar")?.hidden)) {
         const allTerminals = terminals(), allSpaces = spaces();
         const raw = new Map(allTerminals.map(t => [t.address, t]));
         const tabs = new Map(allSpaces.flatMap(s => s.tabs.map(t => [t.id, t])));
         if (agents(allTerminals, allSpaces).some(a => eff(a, tabs, raw) === "working")) cx.notify();
       }
     });
-    if (!props()?.role) {
+    if (!props()?.role && !props()?.overlay) {
       this.refreshUnreported(cx);
       cx.timer.every(2000, cx => this.refreshUnreported(cx));
     }

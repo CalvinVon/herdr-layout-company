@@ -13,6 +13,7 @@ Office 的二维码按矩阵和显示尺寸复用不可变原生 Path；人物�
 目录绑定和分屏请求由始终挂载的协调器处理，隐藏 Spaces 侧栏后仍可从已有目录创建分屏。黑板标题与交付数量共用一行，目标链接下方用分隔线划分文件列表；文件行垂直居中，列表在固定区域内独立滚动，不带动办公室场景。
 
 侧栏所有活动动效保留：工作会话与折叠项目继续播放流光，流光统一使用主题的 `working` 状态色，与会话窗格一致；Space 头像仍保留各项目配色。工作状态点继续脉冲。静态行内容、图标、流光、状态点与计时文本分为独立视图，动画相位只通知流光子视图，计时只通知时间子视图；数据变化即时显示，稳定后复用缓存。隐藏侧栏或窗口失活时暂停展示计时器，后台项目协调器继续运行。此版本需要支持 `Entity.cached()` 及兄弟视图缓存复用的定制 Herdr 原生构建，不能直接覆盖到缺少该接口的发行版。回归检查：`node mods/agent-columns-spaces/timer-check.cjs`、`node mods/agent-columns-spaces/retained-check.cjs`、`node mods/agent-columns-spaces/readiness-check.cjs` 和 `herdr-app check mods/agent-columns-spaces`。
+侧栏 hover 只更新当前行的操作/时间区或当前 Space 标题，逐行缓存不再因其它会话的 hover、状态采集时间戳而整体失效。浮层复用固定 Agents 实例的状态轮询，隐藏、折叠和失活的 Agents 展示停止扫描与计时重绘。相关回归：`node mods/agent-columns-spaces/self-check.cjs`、`node mods/agent-columns/timer-check.cjs`。
 
 流光的缓存子视图根节点显式占满行区域，外层覆盖层固定在行的左上角，避免独立根布局时仅依赖绝对定位四边而丢失绘制尺寸。
 

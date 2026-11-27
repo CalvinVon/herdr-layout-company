@@ -69,6 +69,13 @@ export class RetainedParts {
       cx.notify(entry.handle);
     }
   }
+  hover(key, hovered, cx) {
+    const entry = this.entries.get(key);
+    if (!entry || Boolean(entry.hovered) === hovered) return;
+    entry.hovered = hovered;
+    if (!entry.handle) this.sync(cx);
+    cx.notify(entry.handle);
+  }
   notify(kind, cx) {
     for (const [key, entry] of this.entries) if (entry.kind === kind && entry.handle && this.used.has(key)) cx.notify(entry.handle);
   }

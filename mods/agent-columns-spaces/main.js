@@ -169,7 +169,7 @@ export default class SpacesTabs extends View {
   }
   icon(pane, status, id) {
     return div().size(18).flex_none().relative()
-      .child(this.parts.element(`icon-${id}`, "body", () => sessionIcon(pane, id), el => el.size(18)))
+      .child(this.parts.element(`icon-${id}`, "body", () => sessionIcon(pane, id), el => el.size(18), JSON.stringify([this.parts.signature, Boolean(pane), pane?.program])))
       .when(["working", "done"].includes(status), el => el.child(this.parts.element(`pulse-${id}`, "pulse", () => div().size_full().relative().child(statusDot(status, id)), dot => dot.absolute().left(0).top(0).size(18), JSON.stringify([id, status, theme().working, theme().done]))));
   }
   syncDragFocus(cx) {
@@ -368,10 +368,7 @@ export default class SpacesTabs extends View {
       } else delete this.workingSince[p.pane];
     }
     const groups = groupPaths(spaces(), all, bindings, raw);
-    this.parts.begin(JSON.stringify([all, [...raw], spaces(), bindings, labels, folded, mode, groupFolded, foldAll, t, this.width,
-      this.hoveredSpace, this.hoveredTab, this.hoveredPane, this.focusedDrag, activeOffice, hoveredOffice,
-      this.draggingSpace, this.pressedSpace, this.overSpace, this.draggingTab, this.pressedTab, this.overTab, this.dropAfter,
-      shared("space.colors"), shared("agent-columns.core-status"), Math.floor(now / 60000)]));
+    this.parts.begin(JSON.stringify(t));
     // One aggregation layer: switch between directory / branch / flat organization without
     // changing Space, tab, pane or terminal identity. Directory groups fold independently.
     const modeBar = () => {
@@ -434,7 +431,7 @@ export default class SpacesTabs extends View {
         .when(status === "working" || (closed && hasWorking), el => el.child(this.sweep(`sweep-agent-${p.pane}`, sweepWidth, t.working)))
         .children(treeLines(depth, isLast, trunks))
         .when(Boolean(lead), el => el.child(lead))
-        .on_hover((hovered, cx) => { this.hoveredPane = hovered ? p.pane : (this.hoveredPane === p.pane ? null : this.hoveredPane); cx.notify(); })
+        .on_hover((hovered, cx) => this.parts.hover(`time-agent-${group.id}-${p.pane}`, hovered, cx))
         .on_click(event => { restoreZoom(agent.tab.id, p.pane, p.terminal); run("space.select", { id: group.space.id }); run("tab.select", { id: agent.tab.id }); run("pane.focus", { pane: p.pane }); if (event.click_count === 2 && isAgent) maximizePane(p.pane); })
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); menu("pane", { pane: p.pane, terminal: p.terminal }); })
         .child(this.icon(p, status, `agent-${p.pane}`))
@@ -446,13 +443,13 @@ export default class SpacesTabs extends View {
             .tooltip(status === "done" ? `${title} · 已完成，待查看` : title).child(title))
           .when(Boolean(p.workspaceFolder) && p.workspaceFolder !== p.gitTree?.path, el => el.child(folderBadge(p.workspaceFolder, stale)))
           .when(Boolean(p.worktree), el => el.child(div().id(`branch-agent-${p.pane}`).size(11).flex_none().tooltip(worktreeTooltip(p.worktree)).child(svg("mods/workspace-chrome/git-branch.svg").size(11).text_color(stale ? t.dim : t.muted))))
-          .child(div().flex_1().min_w(0)), el => el.w_full().h(24).flex_1().min_w(0)))
+          .child(div().flex_1().min_w(0)), el => el.w_full().h(24).flex_1().min_w(0), JSON.stringify([this.parts.signature, p.terminal, title, isAgent, Boolean(raw.get(p.terminal)), raw.get(p.terminal)?.parent, stale, isFocused, p.workspaceFolder, p.gitTree?.path, p.worktree, status === "done"])))
         .when(childrenCount > 1, el => el.child(div().flex_none().px(5).py(2).rounded(4).bg(t.raised).text_size(10).text_color(t.muted).tooltip(`${childrenCount} 成员`).child(String(childrenCount))))
-        .child(this.parts.element(`time-agent-${group.id}-${p.pane}`, "time", () => h_flex().w(60).h(22).flex_none().relative().items_center().justify_end().gap(2)
-          .when(this.hoveredPane !== p.pane && status === "done", el => el.child(div().text_size(10).text_color(t.foreground).tooltip("已完成，待查看").child("✓")))
-          .when(this.hoveredPane !== p.pane && status !== "working", el => el.child(updateTime(raw.get(p.terminal)?.status_ms ?? coreState(p.terminal)?.since, Date.now(), t)))
-          .when(this.hoveredPane !== p.pane && status === "working", el => { const start = raw.get(p.terminal)?.status_ms ?? coreState(p.terminal)?.since; return el.child(div().text_size(10).text_color(t.working).tooltip(start ? "本轮 agent 已工作时长" : "从本次观察到 Working 起计时").child(`${start ? "" : "~"}${duration(Date.now() - (start ?? this.workingSince[p.pane]))}`)); })
-          .when(this.hoveredPane === p.pane, el => el.child(btn(`close-agent-${p.pane}`, "x", () => run("pane.close", { pane: p.pane })).absolute().right(0).top(0).bg(t.chrome))), el => el.w(60).h(22).flex_none()));
+        .child(this.parts.element(`time-agent-${group.id}-${p.pane}`, "time", entry => h_flex().w(60).h(22).flex_none().relative().items_center().justify_end().gap(2)
+          .when(!entry.hovered && status === "done", el => el.child(div().text_size(10).text_color(t.foreground).tooltip("已完成，待查看").child("✓")))
+          .when(!entry.hovered && status !== "working", el => el.child(updateTime(raw.get(p.terminal)?.status_ms ?? coreState(p.terminal)?.since, Date.now(), t)))
+          .when(!entry.hovered && status === "working", el => { const start = raw.get(p.terminal)?.status_ms ?? coreState(p.terminal)?.since; return el.child(div().text_size(10).text_color(t.working).tooltip(start ? "本轮 agent 已工作时长" : "从本次观察到 Working 起计时").child(`${start ? "" : "~"}${duration(Date.now() - (start ?? this.workingSince[p.pane]))}`)); })
+          .when(entry.hovered, el => el.child(btn(`close-agent-${p.pane}`, "x", () => run("pane.close", { pane: p.pane })).absolute().right(0).top(0).bg(t.chrome))), el => el.w(60).h(22).flex_none(), JSON.stringify([this.parts.signature, status, raw.get(p.terminal)?.status_ms ?? coreState(p.terminal)?.since, this.workingSince[p.pane], Math.floor(now / 60000)])));
     };
     // Directory / tab group header; the plus opens the launcher with the directory context.
     const groupHeader = (node, group, depth, inBlock, isLast, trunks, corner) => {
@@ -526,8 +523,10 @@ export default class SpacesTabs extends View {
           .tooltip(foldHint))
         .child(btn("new-space", "plus", () => openOverlay({ mod: "space-folders", kind: "dialog", width: 560, height: 500, props: { machine: spaces().find(space => space.active)?.machine } }))))
       .child(modeBar())
-      .child(v_flex().id("spaces-list").w_full().flex_1().min_h(0).overflow_y_scrollbar().children(groups.map((group, i) =>
-        v_flex().id(`space-card-${group.id}`).relative().w_full().mb(4).rounded(6)
+      .child(v_flex().id("spaces-list").w_full().flex_1().min_h(0).overflow_y_scrollbar().children(groups.map((group, i) => {
+        const recent = projectActive(group.space, all, states, raw, coreState, now);
+        const hasSessions = sessionTabs(group.space, all).length > 0;
+        return v_flex().id(`space-card-${group.id}`).relative().w_full().mb(4).rounded(6)
           .bg(group.id === hoveredOffice ? t.hover : group.id === activeOffice ? t.selected : t.chrome)
           .when(this.draggingSpace && this.pressedSpace === group.id, el => el.opacity(0.5))
           .when(this.draggingSpace && this.overSpace === group.id && this.pressedSpace !== group.id, el => el.child(div().absolute().left(4).right(4).when(this.dropAfter, line => line.bottom(0)).when(!this.dropAfter, line => line.top(0)).h(2).bg(t.accent)))
@@ -559,9 +558,9 @@ export default class SpacesTabs extends View {
           })
           .children([
         div().relative().w_full().h(34).flex_none().rounded(6).bg(t.chrome + "00").hover(s => s.bg(t.hover))
-          .on_hover((hovered, cx) => { this.hoveredSpace = hovered ? group.id : (this.hoveredSpace === group.id ? null : this.hoveredSpace); cx.notify(); })
+          .on_hover((hovered, cx) => this.parts.hover(`body-space-${group.id}`, hovered, cx))
           .when(Boolean(folded[group.id]) && group.entries.some(entry => entry.members.some(pane => states.get(pane.pane) === "working")), el => el.child(this.sweep(`sweep-space-${group.id}`, sweepWidth, t.working)))
-          .child(this.parts.element(`body-space-${group.id}`, "body", () => h_flex().id(`folder-${group.id}`).relative().w_full().h(34).items_center().gap(7).px(8).py(6).rounded(6)
+          .child(this.parts.element(`body-space-${group.id}`, "body", entry => h_flex().id(`folder-${group.id}`).relative().w_full().h(34).items_center().gap(7).px(8).py(6).rounded(6)
           .on_click(() => activateSpace(group))
           .cursor_pointer()
           .tooltip((group.binding.folders ?? [{ path: group.folder }]).map(folder => `${group.machine ? group.machine + ":" : ""}${folder.path}`).join("\n"))
@@ -575,13 +574,13 @@ export default class SpacesTabs extends View {
             .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
             .on_click((_event, cx) => { cx.stop_propagation(); activateSpace(group); })
             .child(avatar({ ...group.space, name: group.name }, i)))
-          .child(div().id(`folder-title-${group.id}`).flex_1().min_w(0).truncate().text_size(13.5).text_color(t.dim).when(projectActive(group.space, all, states, raw, coreState, now), el => el.font_black().text_color(t.foreground))
+          .child(div().id(`folder-title-${group.id}`).flex_1().min_w(0).truncate().text_size(13.5).text_color(t.dim).when(recent, el => el.font_black().text_color(t.foreground))
             .tooltip(sessionTabs(group.space, all).length ? (folded[group.id] ? "展开 Space" : "折叠 Space") : "打开 Space 首页")
             .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
             .on_click((_event, cx) => { cx.stop_propagation(); activateSpace(group); })
             .child(group.machine ? `${group.name} · ${group.machine}` : group.name))
           .child(div().id(`space-tail-${group.id}`).flex_none().flex().items_center().gap(4).justify_end()
-            .child((this.hoveredSpace === group.id || this.focusedDrag === group.id)
+            .child((entry.hovered || this.focusedDrag === group.id)
               ? div().id(`drag-space-${group.id}`).size(16).flex_none().flex().items_center().justify_center().text_size(13).text_color(t.dim)
                   .hover(s => s.text_color(t.muted))
                   .cursor_grab().tooltip("拖动排序；键盘上下键调整顺序").role("button").accessibility_label(`调整 ${group.name} 顺序`)
@@ -600,8 +599,8 @@ export default class SpacesTabs extends View {
               .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
               .on_click((_event, cx) => { cx.stop_propagation(); openOverlay({ mod: "space-folders", kind: "dialog", width: 560, height: 500, props: { edit: true, space: group.space.id } }); })
               .child(`${group.binding.folders?.length ?? 1}目录`)))
-          , el => el.w_full().h(34))),
+          , el => el.w_full().h(34), JSON.stringify([this.parts.signature, group.name, group.machine, group.folder, group.binding.folders?.map(folder => folder.path), group.space.tabs.map(tab => tab.id), Boolean(folded[group.id]), hasSessions, recent, this.focusedDrag === group.id, spaceColor(group.space, i)]))),
         ...(folded[group.id] ? [] : spaceNodes(group)).flatMap((node, ni) => renderNode(node, group, 0, nodeContains(node, focusedTerminal), ni === spaceNodes(group).length - 1)),
-      ]))));
+      ]); })));
   }
 }

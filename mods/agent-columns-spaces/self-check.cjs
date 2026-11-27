@@ -296,6 +296,63 @@ for (const mode of ['directory', 'team', 'default']) {
   assert.equal(rows.some(node => node.props.id === 'grp-mods-tab-home-only'), false, 'dedicated homepage stays outside sidebar projections');
   assert.equal(rendered.props.pb + rows.find(node => node.props.id === 'spaces-header').props.h + rows.find(node => node.props.id === 'view-mode').props.h + rows.find(node => node.props.id === 'view-mode').props.mb, 72, 'fixed Spaces controls require 72px');
 }
+viewSpaces = [teamSpace]; viewPanes = teamPanes;
+viewState.set('workspace.project-bindings', { 'team-space': bindings.a });
+viewState.set('agent-columns.view', 'default');
+viewState.set('agent-columns.spaces-folded', {});
+viewState.set('agent-columns.view-folded', {});
+viewState.set('agent-columns.core-status', { lead: { status: 'idle', checked: Date.now(), since: null } });
+sidebar.parts = new RetainedParts();
+let hoverParents = 0;
+const hoverTargets = [], hoverBuilds = { body: 0, time: 0 };
+const renderPart = sidebar.parts.element.bind(sidebar.parts);
+sidebar.parts.element = (key, kind, build, ...args) => renderPart(key, kind, (...values) => { if (kind in hoverBuilds) hoverBuilds[kind]++; return build(...values); }, ...args);
+const hoverContext = {
+  new(Part, properties) {
+    const view = new Part(); view.init(properties);
+    return { key: properties.key, view, cached: () => element(), release() {} };
+  },
+  notify(target) { if (target) { hoverTargets.push(target.key); target.output = target.view.render(); } else hoverParents++; },
+};
+sidebar.render(); sidebar.parts.sync(hoverContext);
+const hoverRoot = sidebar.render(); sidebar.parts.sync(hoverContext);
+hoverTargets.length = 0; hoverParents = hoverBuilds.body = hoverBuilds.time = 0;
+const hoverRow = elements(hoverRoot).find(node => node.props.id === 'agent-team-space-lead');
+hoverRow.props.on_hover(true, hoverContext);
+assert.equal(hoverParents, 0, 'hovering one mounted row never rebuilds the sidebar');
+assert.deepEqual(hoverTargets, ['time-agent-team-space-lead'], 'hover invalidates only the row action/time region');
+assert.equal(hoverBuilds.body, 0, 'hover preserves every static title and program icon');
+assert.equal(hoverBuilds.time, 1, 'hover draws one action/time region');
+const hoveredTime = sidebar.parts.entries.get('time-agent-team-space-lead').handle;
+assert(elements(hoveredTime.output).some(node => node.props.id === 'close-agent-lead'), 'the targeted hover update exposes the close control');
+hoverRow.props.on_hover(false, hoverContext);
+assert(elements(hoveredTime.output).some(node => node.props.tooltip === '最近状态更新时间'), 'leaving the row restores its own timestamp');
+hoverTargets.length = 0;
+hoverRow.props.on_hover(false, hoverContext);
+assert.deepEqual(hoverTargets, [], 'duplicate hover state does not request another render');
+const hoveredCard = elements(hoverRoot).find(node => node.props.id === 'space-card-team-space');
+hoveredCard.nodes[0].props.on_hover(true, hoverContext);
+assert.deepEqual(hoverTargets, ['body-space-team-space'], 'Space hover updates only its own header');
+assert.equal(hoverParents, 0, 'Space hover leaves the sidebar root and other rows cached');
+assert(elements(sidebar.parts.entries.get('body-space-team-space').handle.output).some(node => node.props.id === 'drag-space-team-space'), 'the targeted Space hover still exposes reordering');
+hoveredCard.nodes[0].props.on_hover(false, hoverContext);
+const dirtyParts = () => [...sidebar.parts.entries].filter(([, entry]) => entry.handle && entry.ready !== entry.signature).map(([key]) => key);
+sidebar.render();
+assert.deepEqual(dirtyParts(), [], 'a parent redraw after hover keeps unchanged rows cached');
+viewState.set('agent-columns.core-status', { lead: { status: 'idle', checked: Date.now() + 1, since: null } });
+sidebar.render();
+assert.deepEqual(dirtyParts(), [], 'poll freshness alone does not invalidate row visuals');
+const oldHoverTitle = teamPanes[0].title;
+teamPanes[0].title = 'Updated owner title';
+sidebar.render();
+assert.deepEqual(dirtyParts(), ['body-agent-team-space-lead'], 'a real title change invalidates only its own row body');
+sidebar.parts.sync(hoverContext);
+teamPanes[0].title = oldHoverTitle;
+sidebar.render(); sidebar.parts.sync(hoverContext);
+v4Raw.get('lead').status_ms = Date.now();
+sidebar.render();
+assert.deepEqual(dirtyParts(), ['time-agent-team-space-lead'], 'a status timestamp change does not rebuild titles, icons or other rows');
+sidebar.parts.sync(hoverContext);
 const layoutNodes = node => [node, ...(node.children ?? []).flatMap(layoutNodes)];
 for (const name of ['office', 'agent-columns']) {
   const blocks = layoutNodes(JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'layouts', `${name}.json`), 'utf8')));
