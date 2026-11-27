@@ -304,6 +304,27 @@ panel.active[0].phase = 'upstream';
 assert.ok(texts(byId(panel.render(cx), 'route-decision-0')).includes('模型信息不可用'), 'an upstream request without route details is not presented as waiting');
 panel.active = [{ route: 8, agent: 'codex', session: 'other', model: 'model' }];
 assert.ok(texts(panel.render(cx)).includes('当前会话暂无进行中的请求'), 'retain the idle current session alongside another session’s request');
+// Pinning changes which independently scrolling group owns each visible section.
+const adaptive = new main.namespace.default();
+adaptive.init(undefined, { ...cx, spawn: () => {} });
+adaptive.page = 'routing';
+adaptive.overviewOrder = ['decisions', 'quotas', 'usage', 'usage-trend'];
+adaptive.hiddenSections = ['graph', 'requests'];
+adaptive.pinnedSections = ['decisions', 'quotas'];
+const sectionIds = tree => nodes(tree).map(node => node.attrs.id?.[0]).filter(id => id?.startsWith('overview-section-'));
+let adaptiveRoot = adaptive.render(cx);
+assert.deepEqual(sectionIds(byId(adaptiveRoot, 'overview-pinned-content')), ['overview-section-decisions', 'overview-section-quotas']);
+assert.deepEqual(sectionIds(byId(adaptiveRoot, 'overview-unpinned-content')), ['overview-section-usage', 'overview-section-usage-trend']);
+assert.equal(byId(adaptiveRoot, 'overview-section-graph'), undefined, 'hidden pinned sections do not reserve space');
+adaptive.pinnedSections = ['decisions', 'quotas', 'usage', 'usage-trend'];
+adaptiveRoot = adaptive.render(cx);
+assert.equal(sectionIds(byId(adaptiveRoot, 'overview-pinned-content')).length, 4, 'every visible section stays reachable when all are pinned');
+assert.equal(byId(adaptiveRoot, 'overview-unpinned-content'), undefined);
+adaptive.pinnedSections = [];
+adaptiveRoot = adaptive.render(cx);
+assert.equal(byId(adaptiveRoot, 'overview-pinned'), undefined);
+assert.deepEqual(sectionIds(byId(adaptiveRoot, 'overview-unpinned-content')), ['overview-section-decisions', 'overview-section-quotas', 'overview-section-usage', 'overview-section-usage-trend']);
+
 for (const floating of [false, true]) {
   overlayProps = floating ? { overlay: 'magpie-drawer' } : {};
   const lifecycle = new main.namespace.default();

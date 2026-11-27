@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>分屏状态 · 四种设计方向</title>
+<style>
+:root{color-scheme:light;--page:#f3f4f6;--surface:#fff;--chrome:#eceef2;--pane:#fdfdfd;--ink:#252830;--muted:#555f6f;--dim:#697484;--line:#d0d5de;--blue:#0063c7;--blue-wash:#0063c70d;--blue-soft:#0063c717;--amber:#965600;--amber-wash:#96560012;--amber-soft:#96560020;--amber-solid:#8a5100;--green:#237447;--focus:#657080;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+:root[data-theme=dark]{color-scheme:dark;--page:#191c21;--surface:#22262d;--chrome:#282d35;--pane:#20242b;--ink:#d4d9e2;--muted:#a1abba;--dim:#8d98a8;--line:#3b434e;--blue:#83b7ff;--blue-wash:#83b7ff0d;--blue-soft:#83b7ff1c;--amber:#edb970;--amber-wash:#edb97013;--amber-soft:#edb97020;--amber-solid:#835016;--green:#8acb9f;--focus:#9aa6b8}
+*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--ink)}button,select,input{font:inherit}button,select{color:inherit}button{cursor:pointer}button:focus-visible,select:focus-visible,input:focus-visible,.pane:focus-visible{outline:2px solid var(--blue);outline-offset:3px}button{border:0}header,main{max-width:1480px;margin:auto;padding-left:28px;padding-right:28px}.page-head{padding-top:28px;padding-bottom:24px;display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.eyebrow{font-size:11px;letter-spacing:.13em;color:var(--dim)}h1{font-size:26px;font-weight:650;letter-spacing:-.035em;margin:8px 0 10px}p{margin:0}.intro{font-size:13px;line-height:1.7;color:var(--muted)}.head-controls{display:flex;align-items:center;gap:15px;padding-top:10px;font-size:12px;white-space:nowrap}.head-controls label{display:flex;gap:7px;align-items:center}select{border:1px solid var(--line);border-radius:5px;background:var(--surface);padding:6px 10px}.motion-toggle{cursor:pointer}input{accent-color:var(--blue)}.section-caption{display:flex;gap:12px;align-items:baseline;margin:0 0 14px}.section-caption h2{font-size:13px;font-weight:600;margin:0}.section-caption span{font-size:12px;color:var(--dim)}.directions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.direction{border:1px solid var(--line);background:var(--surface);padding:0;border-radius:9px;text-align:left;overflow:hidden;position:relative;transition:border-color .15s,box-shadow .15s}.direction[aria-pressed=true]{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}.direction:hover{border-color:var(--muted)}.direction-head{padding:17px 15px 13px;display:flex;justify-content:space-between;gap:8px;align-items:center}.direction-title{font-size:15px;font-weight:650}.letter{font-size:12px;font-weight:500;color:var(--dim);padding-right:8px}.selection-mark{font-size:11px;color:var(--blue);visibility:hidden}.direction[aria-pressed=true] .selection-mark{visibility:visible}.mini-stack{display:grid;gap:7px;padding:0 12px}.mini-stack .pane-head{border:1px solid var(--line);border-radius:4px;min-width:0}.mini-stack .title{font-size:11px}.mini-stack .terminal-id{display:none}.mini-stack .status{font-size:10px}.mini-stack .session-icon{font-size:12px}.mini-stack .pane-head{padding-inline:8px;gap:7px}.direction-copy{padding:14px 15px 16px;min-height:86px}.direction-copy strong{font-size:12px;font-weight:500;display:block;margin-bottom:6px}.direction-copy p{font-size:11px;line-height:1.6;color:var(--dim)}.workspace-section{padding-top:30px;padding-bottom:32px}.workspace-top{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:13px}.workspace-top h2{font-size:18px;font-weight:600;margin:0 0 7px}.workspace-top p{font-size:12px;color:var(--muted)}.workspace-controls{display:flex;gap:14px;align-items:center;font-size:12px}.density{display:flex;border:1px solid var(--line);border-radius:5px;overflow:hidden}.density button{padding:6px 11px;background:var(--surface);color:var(--muted)}.density button[aria-pressed=true]{background:var(--ink);color:var(--surface)}.workspace{background:var(--chrome);border:1px solid var(--line);border-radius:9px;overflow:hidden}.window-bar{height:35px;display:flex;align-items:center;gap:7px;padding:0 13px;border-bottom:1px solid var(--line);font-size:11px;color:var(--dim)}.window-dots{display:flex;gap:5px;margin-right:10px}.window-dots i{width:7px;height:7px;border-radius:50%;border:1px solid var(--dim);opacity:.6}.window-bar .grow{flex:1}.demo-tag{font-size:10px}.pane-grid{padding:9px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.pane-grid[data-density="4"]{grid-template-columns:repeat(2,minmax(0,1fr))}.pane{background:var(--pane);border:1px solid var(--line);border-radius:3px;min-width:0;overflow:hidden;cursor:pointer}.pane.is-focused{outline:1px solid var(--focus);outline-offset:1px}.pane-head{height:34px;display:flex;align-items:center;gap:8px;padding:0 11px;background:var(--surface);position:relative;isolation:isolate;overflow:hidden;color:var(--ink);border-bottom:1px solid var(--line)}.head-text{flex:1;min-width:0;z-index:1}.title{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.terminal-id{font-size:10px;color:var(--dim);margin-right:6px}.session-icon{font:500 15px ui-monospace,monospace;color:var(--dim);flex:none;z-index:1}.status{display:flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap;flex:none;z-index:1}.status-icon{display:inline-flex;align-items:center;justify-content:center;position:relative;flex:none;width:13px;height:13px;font-size:11px;font-weight:650}.status-subtitle{display:none}.idle .title{color:var(--muted)}.idle .session-icon,.idle .terminal-id{color:var(--dim)}.idle .status{color:var(--dim)}.blocked .status{color:var(--amber)}.working .status{color:var(--blue)}.done .status{color:var(--green)}.pane-body{height:136px;padding:14px 13px 11px;display:flex;flex-direction:column;gap:8px;font:10px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;overflow:hidden;color:var(--muted);background:var(--pane)}.body-path{font-size:9px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.body-command{font-size:10px;color:var(--ink)}.body-lines{display:grid;gap:5px;margin:2px 0}.body-lines i{display:block;height:3px;background:var(--line);opacity:.45;border-radius:2px}.body-lines i:nth-child(1){width:84%}.body-lines i:nth-child(2){width:65%}.body-lines i:nth-child(3){width:73%}.body-last{margin-top:auto;font-size:10px;display:flex;align-items:center;gap:6px}.blocked .body-last{color:var(--amber)}.working .body-last{color:var(--blue)}.done .body-last{color:var(--green)}.cursor{height:10px;width:5px;display:inline-block;background:var(--dim);opacity:.6}.footer-note{font-size:12px;color:var(--dim);line-height:1.8;display:flex;justify-content:space-between;gap:20px;padding:12px 2px 0}.keyboard-hint{white-space:nowrap}.detail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;padding:20px 2px 6px;border-bottom:1px solid var(--line);margin-bottom:20px}.detail dt{font-size:12px;font-weight:600;margin-bottom:6px}.detail dd{font-size:12px;line-height:1.7;color:var(--muted);margin:0}
+/* A: a leading status signal replaces the program icon; no labels or colored surfaces. */
+.scheme-a .session-icon{display:none}.scheme-a .status{order:-1}.scheme-a .status-label{display:none}.scheme-a .working .status-icon{border:1.5px solid var(--blue);border-right-color:transparent;border-radius:50%;animation:spin 1.5s linear infinite}.scheme-a .working .status-icon::after{content:""}.scheme-a .blocked .status-icon{border-radius:50%;background:var(--amber);color:var(--surface);font-size:10px}.scheme-a .idle .status-icon{border:1px solid var(--dim);border-radius:50%;width:7px;height:7px;margin:3px;opacity:.65}.scheme-a .idle .status-icon::after{content:""}.scheme-a .done .status-icon{font-size:14px}.scheme-a .blocked .title{font-weight:650}
+/* B: an explicit nameplate at a consistent location; all color stays inside it. */
+.scheme-b .status{padding:3px 7px;border-radius:5px}.scheme-b .blocked .status{background:var(--amber-solid);color:#fff}.scheme-b .working .status{background:var(--blue-soft)}.scheme-b .done .status{background:var(--green);color:var(--surface)}.scheme-b .idle .status{padding-right:0}.scheme-b .idle .status-icon{display:none}.scheme-b .working .status-icon{width:14px;gap:2px}.scheme-b .working .status-icon::before,.scheme-b .working .status-icon::after,.scheme-b .working .status-icon i{content:"";display:block;width:2px;height:8px;border-radius:2px;background:currentColor;animation:meter 1.1s ease-in-out infinite}.scheme-b .working .status-icon::after{animation-delay:.2s}.scheme-b .working .status-icon i{animation-delay:.4s}
+/* C: two lines give the state its own place and make the session title primary. */
+.scheme-c .pane-head{height:53px;gap:10px}.scheme-c .head-text{display:flex;flex-direction:column;gap:3px}.scheme-c .title{font-weight:600}.scheme-c .status{display:none}.scheme-c .status-subtitle{font-size:10px;display:flex;align-items:center;gap:5px;color:var(--dim)}.scheme-c .blocked .status-subtitle{color:var(--amber)}.scheme-c .working .status-subtitle{color:var(--blue)}.scheme-c .done .status-subtitle{color:var(--green)}.scheme-c .session-icon{height:25px;width:25px;border-radius:7px;background:var(--chrome);display:flex;align-items:center;justify-content:center;font-size:13px}.scheme-c .blocked .session-icon{background:var(--amber-soft);color:var(--amber)}.scheme-c .working .session-icon{background:var(--blue-soft);color:var(--blue)}.scheme-c .working .status-subtitle::before{content:"";height:5px;width:5px;border-radius:50%;background:currentColor;animation:breathe 1.8s ease-in-out infinite}.scheme-c .idle .title{font-weight:400}.scheme-c .pane-body{height:117px}.scheme-c .mini-stack .pane-head{height:50px}
+/* D: a moving field communicates work; waiting is a static warm field. */
+.scheme-d .working .pane-head{background:var(--blue-wash)}.scheme-d .working .pane-head::before{content:"";position:absolute;inset:0;z-index:0;background:linear-gradient(105deg,transparent 10%,var(--blue-soft) 45%,transparent 80%);transform:translateX(-100%);animation:sweep 4s ease-in-out infinite;pointer-events:none}.scheme-d .blocked .pane-head{background:var(--amber-wash)}.scheme-d .blocked .title{font-weight:650}.scheme-d .working .status-icon{width:6px;height:6px;background:var(--blue);border-radius:50%;animation:breathe 2s ease-in-out infinite}.scheme-d .working .status-icon::after{content:""}.scheme-d .idle .status{display:none}.scheme-d .idle .pane-head{background:var(--chrome)}.scheme-d .idle .pane-body{color:var(--dim)}.scheme-d .idle:not(.is-focused):not(:hover) .body-command{color:var(--dim)}.scheme-d .idle:not(.is-focused):not(:hover) .body-lines{opacity:.5}.scheme-d .idle .session-icon{opacity:.5}.scheme-d .done .status-icon{font-size:14px}
+@keyframes spin{to{transform:rotate(360deg)}}@keyframes meter{0%,100%{transform:scaleY(.45)}50%{transform:scaleY(1)}}@keyframes breathe{0%,100%{opacity:.45}50%{opacity:1}}@keyframes sweep{0%{transform:translateX(-100%)}80%,100%{transform:translateX(100%)}}.paused *,.paused *::before,.paused *::after{animation-play-state:paused!important}@media(prefers-reduced-motion:reduce){* ,*::before,*::after{animation:none!important}.scheme-d .working .pane-head::before{transform:none;opacity:.5}}
+@media(max-width:1100px){.directions{grid-template-columns:repeat(2,minmax(0,1fr))}.page-head{align-items:flex-start}.head-controls{flex-direction:column;align-items:flex-end;gap:9px}.direction-copy{min-height:76px}.mini-stack .terminal-id{display:inline}.pane-grid .session-icon{display:none}}
+@media(max-width:720px){header,main{padding-left:16px;padding-right:16px}.page-head{flex-direction:column;gap:12px}.head-controls{flex-direction:row;align-items:center}.directions{grid-template-columns:1fr}.mini-stack .terminal-id{display:inline}.workspace-top{align-items:flex-start;flex-direction:column}.pane-grid,.pane-grid[data-density="4"]{grid-template-columns:1fr}.detail{grid-template-columns:1fr;gap:12px}.footer-note{flex-direction:column;gap:6px}.keyboard-hint{display:none}h1{font-size:23px}.pane-grid .session-icon{display:inline-flex}}
+</style>
+</head>
+<body>
+<!-- Preview assumptions: reuse the current Herdr light/dark palette; preserve neutral focus outlines; demo sessions are illustrative, not live activity. No production configuration is changed. -->
+<header class="page-head">
+  <div><div class="eyebrow">PANE ACTIVITY / DESIGN STUDY</div><h1>分屏状态，四种不同的表达方式。</h1><p class="intro">先看三个状态的并排比较，再切到下方密集分屏。颜色、位置、信息层级和动效范围都不同。</p></div>
+  <div class="head-controls"><label>主题 <select id="theme" aria-label="预览主题"><option value="light">浅色</option><option value="dark">深色</option></select></label><label class="motion-toggle"><input id="motion" type="checkbox" checked>播放动效</label></div>
+</header>
+<main>
+  <div class="section-caption"><h2>选择一个方向</h2><span>每张卡依次展示：待交互 / 运行中 / idle</span></div>
+  <section class="directions" id="directions" aria-label="四种设计方向"></section>
+  <section class="workspace-section" aria-labelledby="preview-title">
+    <div class="workspace-top"><div><h2 id="preview-title">A · 信号灯</h2><p id="preview-summary"></p></div><div class="workspace-controls"><div class="density" aria-label="分屏数量"><button type="button" data-density="9" aria-pressed="true">3 × 3</button><button type="button" data-density="4" aria-pressed="false">2 × 2</button></div></div></div>
+    <div class="workspace"><div class="window-bar"><div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div><span>多分屏效果预览</span><span class="grow"></span><span class="demo-tag">演示会话 · 非实时状态</span></div><div class="pane-grid scheme-a" id="pane-grid" data-density="9"></div></div>
+    <dl class="detail"><div><dt>待交互</dt><dd id="blocked-detail"></dd></div><div><dt>运行中</dt><dd id="working-detail"></dd></div><div><dt>idle / Done</dt><dd id="idle-detail"></dd></div></dl>
+    <div class="footer-note"><p id="tradeoff"></p><span class="keyboard-hint">快捷键 A–D 切方案 · 点击分屏切换焦点</span></div>
+  </section>
+</main>
+<script>
+const schemes = [
+  {id:'a',name:'信号灯',summary:'极简：只让左侧信号变化，保留完整的中性标题栏。',tag:'视觉负担最低',copy:'图标承担状态，标题不铺色，不使用状态徽标。',blocked:'左侧实心琥珀色感叹号，标题加粗。保持静止，避免催促感。',working:'左侧细圆环慢转；没有整条底色，也没有右侧徽标。',idle:'左侧灰色空心点、低强调标题；Done 换成静态绿色勾号。',tradeoff:'取舍：最耐看，但在距离屏幕较远时，小信号的辨识度有限。'},
+  {id:'b',name:'状态铭牌',summary:'明确：把状态固定在右侧，形成稳定的扫视位置。',tag:'状态识别最直接',copy:'待交互是实色标签；运行中是浅色标签与微型节拍。',blocked:'右侧暖色实心“待交互”标签；其余标题栏保持素色。',working:'右侧浅蓝“运行中”标签，三根短柱轻微起伏；没有大面积底色。',idle:'状态退成灰色文字；Done 使用绿色静态标签。',tradeoff:'取舍：文字最清楚；极窄分屏会多占约 70px 的标题空间。'},
+  {id:'c',name:'双行任务头',summary:'层级：标题和状态分两行，直接改变标题栏的信息结构。',tag:'会话身份更清楚',copy:'第一行看任务，第二行看状态。用空间换清晰度。',blocked:'第二行用琥珀色显示“等待你的确认”，左侧图标有轻量暖色底。',working:'第二行“正在执行”加缓慢呼吸点；主标题保持正常颜色。',idle:'第二行显示“空闲 · 可继续”；Done 显示“本轮已完成”。',tradeoff:'取舍：最适合稍大的分屏；每个分屏标题栏额外占用约 19px。'},
+  {id:'d',name:'柔光扫描',summary:'周边视觉：让标题栏内的缓慢扫光表达运行，减少阅读负担。',tag:'动态辨识最强',copy:'运行看扫光，等待看暖色。没有粗边框或实色徽标。',blocked:'整条标题栏使用非常淡的静态暖色底，“待交互”保持可读。',working:'非常淡的蓝色光带缓慢扫过标题栏；周期 4 秒，不闪烁整块区域。',idle:'标题栏回到中性灰，正文辅助线更弱；悬停或聚焦后恢复。Done 仅留绿色勾号。',tradeoff:'取舍：不读文字也能发现工作中的窗口；多个窗口同时运行时，动态总量较大。'}
+];
+const labels = {blocked:'待交互',working:'运行中',idle:'idle',done:'Done'};
+const subtitles = {blocked:'等待你的确认',working:'正在执行',idle:'空闲 · 可继续',done:'本轮已完成'};
+const sessions = [
+  {id:'t19s',title:'技术负责人 · 研究启动边界',state:'blocked',command:'需要确认：采用哪个设计方向？'},
+  {id:'t19t',title:'研发工程师 · 修复交互流程',state:'working',command:'正在修改组件与调用方'},
+  {id:'t19v',title:'测试工程师 · 验证页面状态',state:'idle',command:'本轮记录已整理，等待下一步'},
+  {id:'t19w',title:'UI 设计师 · 调整信息层级',state:'working',command:'正在检查布局与视觉状态'},
+  {id:'t19r',title:'项目经理 · 跟进需求',state:'idle',command:'需求范围已确认'},
+  {id:'t19x',title:'运维工程师 · 检查运行环境',state:'idle',command:'环境检查已结束'},
+  {id:'t1ch',title:'研发工程师 · 整理组件接口',state:'idle',command:'接口记录已整理'},
+  {id:'t1cw',title:'评审工程师 · 检查变更',state:'done',command:'评审完成，可查看结果'},
+  {id:'t1d3',title:'设计工程师 · 核对设计实现',state:'idle',command:'没有正在执行的任务'}
+];
+let selected = schemes[0], density = 9, focused = sessions[1].id;
+function header(session) {
+  const {id,title,state} = session;
+  const glyph = state === 'blocked' ? '!' : state === 'done' ? '✓' : '';
+  return `<div class="pane-head"><span class="session-icon" aria-hidden="true">Π</span><div class="head-text"><div class="title" title="${title}"><span class="terminal-id">${id}</span>${title}</div><div class="status-subtitle">${subtitles[state]}</div></div><span class="status" aria-label="${labels[state]}"><span class="status-icon" aria-hidden="true">${glyph}${state === 'working' ? '<i></i>' : ''}</span><span class="status-label">${labels[state]}</span></span></div>`;
+}
+const directionRoot = document.querySelector('#directions');
+for (const scheme of schemes) {
+  const button = document.createElement('button');
+  button.type = 'button'; button.className = `direction scheme-${scheme.id}`;
+  button.dataset.scheme = scheme.id; button.setAttribute('aria-pressed', String(scheme.id === selected.id));
+  button.setAttribute('aria-label', `${scheme.id.toUpperCase()} ${scheme.name}`);
+  button.innerHTML = `<div class="direction-head"><span class="direction-title"><span class="letter">${scheme.id.toUpperCase()}</span>${scheme.name}</span><span class="selection-mark">预览中</span></div><div class="mini-stack">${['blocked','working','idle'].map(state=>`<div class="${state}">${header({id:'t19s',title:'技术负责人 · 研究启动边界',state})}</div>`).join('')}</div><div class="direction-copy"><strong>${scheme.tag}</strong><p>${scheme.copy}</p></div>`;
+  directionRoot.append(button);
+}
+function renderWorkspace() {
+  const grid = document.querySelector('#pane-grid');
+  grid.className = `pane-grid scheme-${selected.id}`; grid.dataset.density = density;
+  grid.innerHTML = sessions.slice(0,density).map(session => `<article class="pane ${session.state}${session.id === focused ? ' is-focused' : ''}" tabindex="0" data-session="${session.id}" aria-label="${session.id} ${session.title}，${labels[session.state]}">${header(session)}<div class="pane-body"><div class="body-path">~/Documents/source-driven-workbench</div><div class="body-command">${session.command}</div><div class="body-lines" aria-hidden="true"><i></i><i></i><i></i></div><div class="body-last">${session.state === 'blocked' ? '› 等待输入' : session.state === 'working' ? '› 执行中' : session.state === 'done' ? '✓ 已完成' : '›'}${session.state === 'idle' ? '<span class="cursor"></span>' : ''}</div></div></article>`).join('');
+  document.querySelector('#preview-title').textContent = `${selected.id.toUpperCase()} · ${selected.name}`;
+  document.querySelector('#preview-summary').textContent = selected.summary;
+  for(const state of ['blocked','working','idle']) document.querySelector(`#${state}-detail`).textContent = selected[state];
+  document.querySelector('#tradeoff').textContent = selected.tradeoff;
+  for(const button of document.querySelectorAll('[data-scheme]')) button.setAttribute('aria-pressed', String(button.dataset.scheme === selected.id));
+}
+function selectScheme(id) {
+  const scheme = schemes.find(item=>item.id===id);
+  if (!scheme) return;
+  selected = scheme; renderWorkspace();
+}
+directionRoot.addEventListener('click', event => { const button = event.target.closest('[data-scheme]'); if(button) selectScheme(button.dataset.scheme); });
+document.querySelector('.density').addEventListener('click', event => {
+  const button = event.target.closest('[data-density]'); if(!button) return;
+  density = Number(button.dataset.density);
+  for(const item of document.querySelectorAll('.density button')) item.setAttribute('aria-pressed', String(item === button));
+  renderWorkspace();
+});
+document.querySelector('#theme').addEventListener('change', event => { document.documentElement.dataset.theme = event.target.value; });
+document.querySelector('#motion').addEventListener('change', event => { document.body.classList.toggle('paused', !event.target.checked); });
+function focusPane(pane) {
+  if(!pane) return;
+  focused = pane.dataset.session;
+  for(const item of document.querySelectorAll('.pane')) item.classList.toggle('is-focused', item === pane);
+}
+document.querySelector('#pane-grid').addEventListener('click', event => focusPane(event.target.closest('.pane')));
+document.addEventListener('keydown', event => {
+  if (event.target.matches('input, select, textarea') || event.ctrlKey || event.metaKey || event.altKey) return;
+  if(['a','b','c','d'].includes(event.key.toLowerCase())) selectScheme(event.key.toLowerCase());
+  if((event.key === 'Enter' || event.key === ' ') && event.target.matches('.pane')) {event.preventDefault(); focusPane(event.target);}
+});
+renderWorkspace();
+</script>
+</body>
+</html>

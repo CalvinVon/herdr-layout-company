@@ -146,8 +146,6 @@ export default class MagpieLive extends View {
     this.history = [];
     this.historyAt = 0;
     this.width = 500;
-    this.height = 600;
-    this.pinnedHeight = 0;
     this.active = [];
     this.routes = {};
     this.recent = [];
@@ -882,10 +880,11 @@ export default class MagpieLive extends View {
       };
       const visible = order.filter((id) => !this.hiddenSections.includes(id));
       const pinned = visible.filter((id) => this.pinnedSections.includes(id));
+      const unpinned = visible.filter((id) => !this.pinnedSections.includes(id));
       return v_flex().id("magpie-live-root").size_full().min_h(0).bg(t.surface)
         .on_hover((hovered, next) => { if (!hovered && this.pressedSection) { this.pressedSection = null; this.overSection = null; this.draggingSection = false; next.notify(); } })
         .on_mouse_up("left", (_event, next) => { if (this.pressedSection) { this.pressedSection = null; this.overSection = null; this.draggingSection = false; next.notify(); } })
-        .on_size_change((size, next) => { if (this.width !== size.width || this.height !== size.height) { this.width = size.width; this.height = size.height; next.notify(); } })
+        .on_size_change((size, next) => { if (this.width !== size.width) { this.width = size.width; next.notify(); } })
         .child(header)
         .child(h_flex().justify_between().items_center().px(12).py(10)
           .child(text(`${PERIODS.find(([id]) => id === this.period)?.[1] || "本期"} ${usage?.calls?.toLocaleString() ?? "—"} 次调用`, t.muted, 10))
@@ -896,10 +895,11 @@ export default class MagpieLive extends View {
           .child(text("已隐藏：", t.dim, 10))
           .children(order.filter((id) => this.hiddenSections.includes(id)).map((id) => div().id(`overview-restore-${id}`).cursor_pointer().text_size(10).text_color(t.accent).tooltip("恢复区块")
             .on_click((_e, next) => { this.hiddenSections = this.hiddenSections.filter((item) => item !== id); preferences.setItem("magpie-live.hidden-sections", JSON.stringify(this.hiddenSections)); next.notify(); }).child(`+ ${sections.find((item) => item.id === id).name}`)))))
-        .when(pinned.length > 0, body => body.child(div().id("overview-pinned").flex_none().h(Math.min(this.pinnedHeight || Math.max(80, this.height * 0.4), Math.max(80, this.height * 0.4))).overflow_y_scrollbar().px(8)
-          .child(v_flex().id("overview-pinned-content").flex_none().gap(8).on_size_change((size, next) => { if (this.pinnedHeight !== size.height) { this.pinnedHeight = size.height; next.notify(); } }).children(pinned.map(sectionView)))))
-        .child(div().flex_1().min_h(0).overflow_y_scrollbar().child(v_flex().gap(8).p(8)
-          .children(visible.filter((id) => !this.pinnedSections.includes(id)).map(sectionView))))
+        .child(v_flex().id("overview-body").flex_1().min_h(0)
+          .when(pinned.length > 0, body => body.child(div().id("overview-pinned").flex_initial().min_h(0).overflow_y_scrollbar().px(8)
+            .child(v_flex().id("overview-pinned-content").flex_none().gap(8).children(pinned.map(sectionView)))))
+          .when(unpinned.length > 0, body => body.child(div().flex_auto().min_h(0).overflow_y_scrollbar()
+            .child(v_flex().id("overview-unpinned-content").flex_none().gap(8).p(8).children(unpinned.map(sectionView))))))
         .child(h_flex().justify_between().px(10).py(7).border_t(1).border_color(t.border)
           .child(text("数据只读 · 每 5 秒刷新", t.dim, 9))
           .child(text(currentSession ? requests.some(current) ? "当前请求已标识" : "当前会话暂无近期请求" : "当前 Agent 未关联", t.dim, 9)));

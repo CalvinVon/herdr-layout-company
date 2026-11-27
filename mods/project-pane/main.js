@@ -21,7 +21,22 @@ function folder(cwd) {
 }
 
 export default class Pane extends View {
-  init(_props, cx) { this.hovered = false; this.direction = "right"; this.focused = null; if (props()?.moveMenu) { this.handle = cx.focus_handle(); this.handle.focus(); } cx.timer.every(1000, cx => { const pane = this.me(); if (pane && pane.focused !== this.focused) { this.focused = pane.focused; cx.notify(); } }); }
+  init(_props, cx) {
+    this.hovered = false;
+    this.direction = "right";
+    this.focused = null;
+    this.width = 0;
+    this.windowActive = globalThis.window.is_window_active();
+    if (props()?.moveMenu) { this.handle = cx.focus_handle(); this.handle.focus(); return; }
+    cx.timer.every(1000, cx => {
+      const pane = this.me(), active = globalThis.window.is_window_active();
+      if (pane && (pane.focused !== this.focused || active !== this.windowActive)) {
+        this.focused = pane.focused;
+        this.windowActive = active;
+        cx.notify();
+      }
+    });
+  }
 
   me() {
     return panes().find((p) => p.pane === props()?.pane);
@@ -90,8 +105,11 @@ export default class Pane extends View {
     const title = (p.title || "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
     const agentName = p.program?.agent && p.program.name;
     const name = title || agentName || p.program?.name || "shell";
-    const pic = icon(p.program, 14, t.dim);
     const st = p.status;
+    const signalLabel = st === "working" ? "运行中" : st === "blocked" ? "待交互" : st === "done" ? "Done" : st === "idle" ? "idle" : null;
+    const statusColor = st === "working" ? t.working : st === "done" ? t.done : st === "blocked" ? t.blocked : t.dim;
+    const pic = signalLabel ? null : icon(p.program, 14, t.dim);
+    const quiet = st === "idle" && !p.focused;
     const all = terminals();
     const terminal = all.find(item => item.address === p.terminal);
     const parent = terminal?.parent && all.find(item => item.address === terminal.parent);
@@ -100,32 +118,43 @@ export default class Pane extends View {
     const pane = p.pane;
     return h_flex()
       .id(`pane-head-${pane}`)
-      .size_full()
+      .size_full().relative().overflow_hidden()
       .px(10)
       .gap(8)
       .items_center()
-      .bg(st === "blocked" ? t.blocked + (p.focused ? "33" : "1a") : p.focused ? light ? t.surface : t.background : t.chrome)
-      .border_b(st === "blocked" ? 2 : 1)
-      .border_color(st === "blocked" ? (p.focused ? t.accent : t.blocked) : p.focused ? t.border : t.chrome)
+      .when(st !== "idle", el => el.bg(st === "blocked" ? t.blocked + "12" : st === "working" ? t.working + "0d" : p.focused ? light ? t.surface : t.background : t.chrome))
+      .border_b(1)
+      .border_color(p.focused ? t.border : t.chrome)
       .text_size(12)
       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
       .on_click(event => { run("pane.focus", { pane }); if (event.click_count === 2) run("pane.zoom", { pane }); })
-      .when(Boolean(pic) || st === "working" || st === "done", el => el.child(div().size(18).flex_none().relative().when(Boolean(pic), icon => icon.child(pic))
-        .when(st === "working" || st === "done", icon => icon.child(div().id(`pane-status-${pane}`).absolute().right(0).top(11).size(6).rounded(3)
-          .bg(st === "working" ? t.working : t.done).when(st === "working", dot => dot.loop("top", { from: 9, to: 13, period: 1000 }))))))
+      .on_size_change((size, next) => { if (this.width !== size.width) { this.width = size.width; next.notify(); } })
+      // One native effect per working/blocked pane; text stays static and hidden panes are not drawn.
+      .when(st === "blocked" && globalThis.window.is_window_active(), el => el.child(div().id(`pane-attention-${pane}`).absolute().left(0).top(0).size_full().bg(t.blocked).opacity(0.04)
+        .loop("opacity", { from: 0.04, to: 0.2, period: 2000, easing: "ease-in-out" })))
+      .when(st === "working" && this.width > 0 && globalThis.window.is_window_active(), el => el.child(div().absolute().left(0).top(0).size_full().overflow_hidden()
+        .child(div().id(`pane-sweep-${pane}`).absolute().left(-this.width * 0.55).top(0).w(this.width * 0.55).h_full()
+          .loop("left", { from: -this.width * 0.55, to: this.width, period: 8000, easing: "linear" })
+          .child(svg("mods/agent-columns-spaces/working-sweep.svg").size_full().text_color(t.working).opacity(0.75)))))
+      .when(Boolean(signalLabel), el => el.child(div().id(`pane-signal-${pane}`).size(14).flex_none().flex().items_center().justify_center().text_color(statusColor).text_size(12).font_semibold().tooltip(signalLabel).accessibility_label(signalLabel)
+        .when(st === "working", signal => signal.child(div().id(`pane-working-dot-${pane}`).size(10).rounded_full().bg(t.working)))
+        .when(st === "blocked" || st === "done", signal => signal.child(st === "blocked" ? "!" : "✓"))
+        .when(st === "idle", signal => signal.child(div().size(6).rounded_full().border(1).border_color(t.dim)))))
+      .when(Boolean(pic), el => el.child(pic.when(quiet, icon => icon.opacity(0.55))))
       .when(Boolean(terminal && isAgent), el => el.child(div().size(20).flex_none().flex().items_center().justify_center()
         .tooltip(terminal.parent ? `子 Agent · 父级：${parent?.title || terminal.parent} (${terminal.parent})` : `主 Agent · ${terminal.address}`)
-        .child(svg(`mods/agent-columns-spaces/agent-chat-${terminal.parent ? "worker" : "lead"}.svg`).size(14).text_color(terminal.parent ? t.muted : t.accent))))
-      .when(Boolean(isAgent && p.terminal), el => el.child(div().id(`copy-pane-id-${pane}`).flex_none().text_color(t.working).cursor_pointer().tooltip(`点击复制 ${p.terminal}`).on_mouse_down("left", (_event, cx) => cx.stop_propagation()).on_mouse_up("left", (_event, cx) => cx.stop_propagation()).on_click((_event, cx) => { cx.stop_propagation(); cx.write_to_clipboard(p.terminal); }).child(p.terminal)))
-      .child(div().flex_none().truncate().max_w(360).font_medium().when(st === "blocked", el => el.font_semibold()).text_color(t.foreground).tooltip(name).child(name))
-      .child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd)))
-      .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
+        .child(svg(`mods/agent-columns-spaces/agent-chat-${terminal.parent ? "worker" : "lead"}.svg`).size(14).text_color(quiet ? t.dim : terminal.parent ? t.muted : t.accent))))
+      .when(Boolean(isAgent && p.terminal), el => el.child(div().id(`copy-pane-id-${pane}`).flex_none().text_color(quiet ? t.dim : t.working).cursor_pointer().tooltip(`点击复制 ${p.terminal}`).on_mouse_down("left", (_event, cx) => cx.stop_propagation()).on_mouse_up("left", (_event, cx) => cx.stop_propagation()).on_click((_event, cx) => { cx.stop_propagation(); cx.write_to_clipboard(p.terminal); }).child(p.terminal)))
+      .child(div().flex_shrink(1).min_w(0).truncate().max_w(360).font_medium().when(st === "blocked" || st === "working", el => el.font_semibold()).text_color(st === "working" ? t.working : quiet ? t.muted + "e6" : t.foreground).tooltip(name).child(name))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(folder(p.cwd)))
       .when(this.hovered, el => el
         .child(this.button(t, `ph-r-${pane}`, "split-right", "pane.split", { direction: "right", pane }))
         .child(this.button(t, `ph-d-${pane}`, "split-down", "pane.split", { direction: "down", pane }))
         .when(Boolean(terminal && isAgent && panes().filter(item => item.tab === p.tab).length > 1), el => el.child(div().id(`ph-tab-${pane}`).p(3).rounded(4).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip("移动 Agent")
           .on_click((_e, cx) => { cx.stop_propagation(); const space = spaces().find(item => item.active && item.tabs.some(tab => tab.id === p.tab)); if (!space) { notify({ title: "无法移动", body: "原 Space 已变化，请重试。", level: "warning" }); return; } const tabName = title || agentName || p.program?.name || "Agent"; openOverlay({ mod: "project-pane", kind: "popup", width: 320, height: 360, props: { moveMenu: true, pane, terminal: terminal.address, tab: p.tab, name: tabName, space: space.id, machine: space.machine ?? null } }); }).child(svg("mods/project-pane/move-tab.svg").size(14))))
-        .child(this.button(t, `ph-z-${pane}`, p.zoomed ? "unzoom" : "zoom", "pane.zoom", { pane }))
+        .child(this.button(t, `ph-z-${pane}`, p.zoomed ? "unzoom" : "zoom", "pane.zoom", { pane })
+          .tooltip(p.zoomed ? "还原分屏" : "最大化分屏").role("button").accessibility_label(p.zoomed ? "还原分屏" : "最大化分屏")
+          .when(st === "blocked", button => button.flex().items_center().gap(4).px(6).bg(t.blocked + "14").text_color(t.blocked).child(p.zoomed ? "还原" : "最大化")))
         .child(this.button(t, `ph-x-${pane}`, "close", "pane.close", { pane })));
   }
 }

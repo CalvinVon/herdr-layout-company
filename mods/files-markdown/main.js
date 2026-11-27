@@ -13,6 +13,11 @@ const key = () => JSON.stringify(location());
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 const PER_FOLDER = 500, TOTAL = 5000;
 
+function sourcePosition(line, column = 1) {
+  if (!Number.isSafeInteger(line) || line < 1 || !Number.isSafeInteger(column) || column < 1) throw new Error("文件行号和列号必须为正整数");
+  return { line, column };
+}
+
 async function directory(path, on) {
   const windowsDirectory = async () => {
     // Windows PowerShell otherwise uses the console code page; exec decodes UTF-8.
@@ -132,19 +137,31 @@ export default class Files extends View {
     cx.notify();
   }
 
-  show(path, cx) {
-    this.code?.release(); this.code = null; this.file = path; this.fileError = null; this.markdown = null; this.preview = true; this.text = null; this.find = null;
+  show(path, cx, position = null) {
+    const opening = this.opening = {};
+    if (position && path === this.file && this.code && !this.truncated && cx) {
+      const code = this.code, context = this.context;
+      this.preview = false;
+      cx.spawn(async next => {
+        if (this.opening !== opening || this.code !== code || !this.current(context)) return;
+        code.reveal_line(position.line, position.column);
+        next.notify();
+      });
+      return;
+    }
+    this.code?.release(); this.code = null; this.file = path; this.fileError = null; this.markdown = null; this.preview = !position; this.text = null; this.find = null; this.truncated = false;
     this.document?.release(); this.document = null;
     if (!path || !cx) return;
     const context = this.context, root = this.root, on = this.on;
     cx.spawn(async cx => {
       try {
         const text = await readTextFile(/^(?:[a-z]:[\\/]|[\\/])/i.test(path) ? path : `${root}/${path}`, { on });
-        if (this.file !== path || !this.current(context)) return;
+        if (this.opening !== opening || this.file !== path || !this.current(context)) return;
         if (text === null) { this.fileError = "This file is no longer available"; return; }
         if (text.includes("\0")) { this.fileError = "Binary file · no text preview"; return; }
         const t = theme(), ext = path.includes(".") ? path.split(".").pop().toLowerCase() : "txt";
-        const value = text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text;
+        this.truncated = !position && text.length > 400000;
+        const value = this.truncated ? text.slice(0, 400000) + "\n… (file truncated)" : text;
         this.text = value;
         if (ext === "md") {
           this.markdown = value;
@@ -159,7 +176,8 @@ export default class Files extends View {
           value,
           font_family: settings().font_family, font_size: 12,
           syntax: { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 } });
-      } catch { if (this.file === path && this.current(context)) this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; }
+        if (position) this.code.reveal_line(position.line, position.column);
+      } catch { if (this.opening === opening && this.file === path && this.current(context)) this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; }
       finally { cx.notify(); }
     });
   }
@@ -216,14 +234,22 @@ export default class Files extends View {
       path = path.replace(/^file:\/\/(?:localhost)?/i, "");
       if (!path.startsWith("/")) return;
       if (/^\/[a-z]:\//i.test(path)) path = path.slice(1);
-    } else if (/^[a-z][a-z\d+.-]*:/i.test(path) && !/^[a-z]:[\\/]/i.test(path)) return;
+    }
+    const suffix = /:(\d+)(?::(\d+))?$/.exec(path);
+    let position = null;
+    if (suffix) {
+      try { position = sourcePosition(Number(suffix[1]), suffix[2] ? Number(suffix[2]) : 1); }
+      catch (error) { notify({ title: "无法定位代码", body: error.message, level: "error" }); return; }
+      path = path.slice(0, suffix.index);
+    }
+    if (/^[a-z][a-z\d+.-]*:/i.test(path) && !/^[a-z]:[\\/]/i.test(path)) return;
     try { path = decodeURIComponent(path); } catch { return; }
     if (!path) return;
     if (!/^(?:[a-z]:[\\/]|[\\/])/i.test(path)) {
       const slash = Math.max(this.file.lastIndexOf("/"), this.file.lastIndexOf("\\"));
       path = (slash < 0 ? "" : this.file.slice(0, slash + 1)) + path;
     }
-    this.show(path, cx);
+    this.show(path, cx, position);
     cx.notify();
   }
 
@@ -252,10 +278,14 @@ export default class Files extends View {
       if (restore.context === this.context?.key) { this.show(restore.file, cx); this.preview = restore.preview; }
     }
     const requested = shared("files-markdown.open");
-    if (typeof requested === "string" && active) {
+    const requestedPath = typeof requested === "string" ? requested : requested?.path;
+    if (typeof requestedPath === "string" && active) {
       setShared("files-markdown.open", null);
-      if (requested.startsWith("file:///")) this.openLink(requested, cx);
-      else this.show(requested, cx);
+      if (typeof requested === "object") {
+        try { this.show(requestedPath, cx, sourcePosition(requested.line, requested.column ?? 1)); }
+        catch (error) { notify({ title: "无法定位代码", body: error.message, level: "error" }); }
+      } else if (requestedPath.startsWith("file:///")) this.openLink(requestedPath, cx);
+      else this.show(requestedPath, cx);
     }
     if (active) {
       const current = { context: this.context?.key, file: this.file ?? null, preview: this.preview ?? true }, previous = shared("files-markdown.current");

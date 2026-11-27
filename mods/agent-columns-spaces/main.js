@@ -381,7 +381,7 @@ export default class SpacesTabs extends View {
           .children([
         div().relative().w_full().h(34).flex_none().rounded(6).bg(t.chrome + "00").hover(s => s.bg(t.hover))
           .on_hover((hovered, cx) => { this.hoveredSpace = hovered ? group.id : (this.hoveredSpace === group.id ? null : this.hoveredSpace); cx.notify(); })
-          .when(Boolean(folded[group.id]) && group.entries.some(entry => entry.members.some(pane => states.get(pane.pane) === "working")), el => el.child(this.sweep(`sweep-space-${group.id}`, sweepWidth, spaceColor(group.space, i))))
+          .when(Boolean(folded[group.id]) && group.entries.some(entry => entry.members.some(pane => states.get(pane.pane) === "working")), el => el.child(this.sweep(`sweep-space-${group.id}`, sweepWidth, t.working)))
           .child(this.parts.element(`body-space-${group.id}`, "body", () => h_flex().id(`folder-${group.id}`).relative().w_full().h(34).items_center().gap(7).px(8).py(6).rounded(6)
           .on_click(() => activateSpace(group))
           .cursor_pointer()
@@ -442,7 +442,7 @@ export default class SpacesTabs extends View {
             h_flex().id(`tb-${group.id}-${tb.id}`).relative().h(32).items_center().gap(4).pl(32).pr(8).py(4).min_h(32).rounded(6)
               .bg(unreadDone ? t.done + "18" : sp.active && tb.active ? (mine.length <= 1 ? t.selected : folded[tb.id] ? t.accent + "20" : parentPane?.focused ? t.selected : t.chrome + "00") : t.chrome + "00")
               .hover((s) => s.bg(unreadDone ? t.done + "26" : t.hover)).cursor_pointer()
-              .when(status === "working" && (mine.length <= 1 || folded[tb.id]), el => el.child(this.sweep(`sweep-tab-${tb.id}`, sweepWidth, spaceColor(group.space, i))))
+              .when(status === "working" && (mine.length <= 1 || folded[tb.id]), el => el.child(this.sweep(`sweep-tab-${tb.id}`, sweepWidth, t.working)))
               .on_hover((hovered, cx) => { this.hoveredTab = hovered ? tb.id : (this.hoveredTab === tb.id ? null : this.hoveredTab); cx.notify(); })
               .on_click(event => { restoreZoom(tb.id, rowPane?.pane, rowPane?.terminal); run("space.select", { id: sp.id }); run("tab.select", { id: tb.id }); if (parentPane) run("pane.focus", { pane: parentPane.pane }); if (event.click_count === 2 && rowPane && (rowPane.program?.agent || states.get(rowPane.pane))) maximizePane(rowPane.pane); })
               .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); menu("tab", { id: tb.id, space: sp.id }); })
@@ -508,7 +508,7 @@ export default class SpacesTabs extends View {
               h_flex().id(`pane-${p.pane}`).relative().w_full().h(28).flex_none().items_center().gap(4).pl(34).pr(8).rounded(6)
                 .bg(p.focused ? t.selected : states.get(p.pane) === "done" ? t.done + "18" : t.chrome + "00")
                 .hover((s) => s.bg(p.focused ? t.selected : states.get(p.pane) === "done" ? t.done + "26" : t.hover)).cursor_pointer()
-                .when(states.get(p.pane) === "working", el => el.child(this.sweep(`sweep-pane-${p.pane}`, sweepWidth, spaceColor(group.space, i))))
+                .when(states.get(p.pane) === "working", el => el.child(this.sweep(`sweep-pane-${p.pane}`, sweepWidth, t.working)))
                 .on_hover((hovered, cx) => { this.hoveredPane = hovered ? p.pane : (this.hoveredPane === p.pane ? null : this.hoveredPane); cx.notify(); })
                 .on_click(event => {
                   restoreZoom(tb.id, p.pane, p.terminal);

@@ -212,7 +212,7 @@ export default class Tabs extends View {
     if (this.panelMode === "inline") this.syncPanel(space, panel, body, enabled);
     else if (panel && !panel.hidden) run("layout.hide", { id: "panel" });
     this.syncEditor(space, panel, body, cx);
-    if (this.panelMode === "floating" && space && typeof shared("files-markdown.open") === "string") {
+    if (this.panelMode === "floating" && space && (typeof shared("files-markdown.open") === "string" || typeof shared("files-markdown.open")?.path === "string")) {
       const current = shared("project-tabs.floating-panel");
       if (current?.space !== space.id || current?.panel !== "files") setShared("project-tabs.floating-panel", { space: space.id, panel: "files" });
     }
