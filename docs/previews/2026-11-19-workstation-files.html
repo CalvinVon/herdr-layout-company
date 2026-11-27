@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工位文件箱 · 三款样式预览</title>
+<style>
+  :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; color: #29352f; background: #f5f4ee; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 42px 42px 30px; }
+  main { max-width: 1360px; margin: auto; }
+  header { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
+  .eyebrow { margin: 0 0 8px; font-size: 11px; letter-spacing: 1.8px; color: #778277; }
+  h1 { margin: 0; font-size: 29px; font-weight: 600; letter-spacing: -.8px; }
+  .intro { font-size: 13px; line-height: 1.8; color: #6f786c; margin: 10px 0 0; }
+  .control { display: flex; align-items: center; gap: 12px; white-space: nowrap; font-size: 12px; color: #5f6c60; padding-bottom: 4px; }
+  input { accent-color: #58735b; width: 120px; }
+  output { font-size: 15px; font-weight: 600; min-width: 24px; color: #29352f; }
+  .options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  article { background: #fffefa; border: 1px solid #dcded3; overflow: hidden; }
+  .option-title { padding: 19px 20px 15px; display: flex; gap: 12px; align-items: baseline; }
+  .letter { font-size: 12px; color: #869180; font-weight: 500; }
+  h2 { margin: 0; font-size: 18px; font-weight: 600; }
+  .recommend { margin-left: auto; color: #597252; font-size: 10px; background: #eef3e9; padding: 3px 6px; }
+  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+  .scene { aspect-ratio: 420 / 260; }
+  .zoom { aspect-ratio: 420 / 130; background: #e9ebe3; }
+  .zoom-label { display: flex; justify-content: space-between; padding: 11px 19px 0; font-size: 10px; color: #818c7d; background: #e9ebe3; }
+  .description { padding: 16px 20px 20px; }
+  .description p { font-size: 12px; line-height: 1.9; color: #6b7768; margin: 0; min-height: 46px; }
+  .detail { display: block; border-top: 1px solid #eceee5; margin-top: 12px; padding-top: 11px; color: #889081; font-size: 10px; }
+  .progression { margin-top: 24px; border-top: 1px solid #d8dbce; padding-top: 18px; display: flex; align-items: center; gap: 30px; }
+  .progression p { font-size: 12px; color: #78836f; margin: 0; line-height: 1.8; min-width: 145px; }
+  .progression canvas { width: 160px; height: 82px; background: #e9ebe3; }
+  .stage { display: flex; align-items: center; gap: 6px; }
+  .stage span { color: #78836f; font-size: 11px; }
+  footer { font-size: 10px; color: #8d9585; margin-top: 22px; display: flex; justify-content: space-between; }
+  button { font: inherit; background: transparent; border: 0; color: #597252; cursor: pointer; padding: 0; }
+  button:focus-visible, input:focus-visible { outline: 2px solid #58735b; outline-offset: 4px; }
+  @media (max-width: 900px) { body { padding: 24px; } header { align-items: start; flex-direction: column; } .options { grid-template-columns: 1fr; } .progression { flex-wrap: wrap; } }
+</style>
+<main>
+  <header>
+    <div>
+      <p class="eyebrow">OFFICE / WORKSTATION FILES</p>
+      <h1>文件落到桌下，成果一层层叠起来</h1>
+      <p class="intro">沿用现有工位像素画。箱体落地、白纸可见，文件增加时向上堆叠。</p>
+    </div>
+    <label class="control" for="count">预览文件数量 <input id="count" type="range" min="1" max="8" value="4"><output id="count-value" for="count">4 份</output></label>
+  </header>
+  <section class="options" aria-label="三个文件箱样式">
+    <article>
+      <div class="option-title"><span class="letter">A</span><h2>开放纸箱</h2><span class="recommend">推荐</span></div>
+      <canvas class="scene" data-style="a" aria-label="开放纸箱放在工位桌下，白色文件向上叠放"></canvas>
+      <div class="zoom-label"><span>文件箱局部</span><span>白纸边缘逐层露出</span></div>
+      <canvas class="zoom" data-style="a" aria-label="开放纸箱放大预览"></canvas>
+      <div class="description"><p>牛皮纸箱配奶白色文件。箱口敞开，纸张略微错位，最贴近现有办公室的暖色像素风格。</p><span class="detail">箱前留标签位 · 文件类型用小色签区分</span></div>
+    </article>
+    <article>
+      <div class="option-title"><span class="letter">B</span><h2>分层文件托盘</h2></div>
+      <canvas class="scene" data-style="b" aria-label="蓝灰色文件托盘放在工位桌下，每层有白色文件"></canvas>
+      <div class="zoom-label"><span>文件箱局部</span><span>托盘和白纸交替叠放</span></div>
+      <canvas class="zoom" data-style="b" aria-label="分层文件托盘放大预览"></canvas>
+      <div class="description"><p>蓝灰色托盘逐层垒高，每层露出一叠白纸。层级最清楚，文件增长也最容易被看见。</p><span class="detail">托盘边沿清晰 · 多文件时显示总数</span></div>
+    </article>
+    <article>
+      <div class="option-title"><span class="letter">C</span><h2>帆布文件箱</h2></div>
+      <canvas class="scene" data-style="c" aria-label="绿色帆布文件箱放在工位桌下，白色文件阶梯式向上排列"></canvas>
+      <div class="zoom-label"><span>文件箱局部</span><span>白纸像阶梯一样错层升高</span></div>
+      <canvas class="zoom" data-style="c" aria-label="帆布文件箱放大预览"></canvas>
+      <div class="description"><p>低矮的鼠尾草绿箱体，白色文件竖放成阶梯。轮廓更轻巧，箱体和文件的区分最直接。</p><span class="detail">箱前嵌入拉手 · 白纸保留大面积留白</span></div>
+    </article>
+  </section>
+  <section class="progression" aria-label="开放纸箱随文件数量的变化">
+    <p>A 款的数量变化<br>始终显示文件总数</p>
+    <div class="stage"><canvas data-style="a" data-count="1" class="sample"></canvas><span>1 份</span></div>
+    <div class="stage"><canvas data-style="a" data-count="3" class="sample"></canvas><span>3 份</span></div>
+    <div class="stage"><canvas data-style="a" data-count="8" class="sample"></canvas><span>8 份</span></div>
+  </section>
+  <footer><span>桌面、显示器、人物沿用现有工位素材；文件箱为待选设计。</span><button id="reset" type="button">恢复 4 份文件</button></footer>
+</main>
+<script>
+  const palette = { chair: "#58667d", chairLeg: "#354954", deskTop: "#b9855a", deskEdge: "#966f4c", deskLeg: "#715338", deskSide: "#936a3f", handle: "#e5be7e", kbd: "#bcc9c1", mon: "#283843", mug: "#b4c6a4", lamp: "#48585c", lampShade: "#527765", skin: "#d79d71", eye: "#2a2b2a", hair: "#5b3b2e", shirt: "#d5a14c", pants: "#485366", shoe: "#303c41", sleeve: "#b7833c" };
+  const chair = [[0,-18,2,10,"chair"],[0,-8,8,2,"chair"],[3,-6,2,5,"chairLeg"],[1,-1,6,1,"chairLeg"]];
+  const desk = [[10,-12,26,2,"deskTop"],[10,-10,26,1,"deskEdge"],[13,-9,2,9,"deskLeg"],[33,-9,2,9,"deskLeg"],[24,-9,8,6,"deskSide"],[26,-7,3,1,"handle"],[12,-13,5,1,"kbd"],[21,-24,12,10,"mon"],[26,-14,2,1,"mon"],[24,-13,6,1,"mon"],[10,-14,2,2,"mug"],[9,-14,1,1,"mug"],[33,-13,3,1,"lamp"],[34,-19,1,6,"lamp"],[33,-22,4,3,"lampShade"]];
+  const person = [[3,-23,6,7,"skin"],[9,-20,1,1,"skin"],[7,-21,1,2,"eye"],[2,-24,7,3,"hair"],[2,-21,2,3,"hair"],[3,-16,6,6,"shirt"],[3,-10,8,2,"pants"],[10,-8,2,7,"pants"],[10,-1,3,1,"shoe"],[5,-16,2,3,"sleeve"],[6,-14,7,2,"sleeve"],[13,-14,2,1,"skin"]];
+  const tabs = ["#78a5d1", "#d19a69", "#c7828e"];
+  const count = document.querySelector("#count");
+  function fileBox(style, count) {
+    const rects = [];
+    const layers = Math.min(count, 5);
+    if (style === "a") {
+      rects.push([0,-5,14,5,"#836246"],[1,-5,12,4,"#b68a55"],[1,-5,12,1,"#775c42"]);
+      for (let index = 0; index < layers; index++) {
+        const offset = index % 2;
+        rects.push([1+offset,-6-index,11,1,"#fffef5"],[1+offset,-5.25-index,11,.25,"#b5beb9"],[12+offset,-6-index,1,1,"#b5beb9"],[10+offset,-6-index,2,.75,tabs[index%3]]);
+      }
+      rects.push([0,-4,14,1,"#d4ad75"],[1,-3,12,3,"#bd935d"],[0,-4,1,4,"#8b6946"],[13,-4,1,4,"#966f49"],[4,-2,6,1,"#f4e9ce"],[5,-2,3,1,"#c9b58f"]);
+    } else if (style === "b") {
+      const trays = Math.min(3, Math.ceil(count / 2));
+      for (let index = 0; index < trays; index++) {
+        const top = -3-index*3;
+        rects.push([0,top,14,3,"#455e6c"],[1,top,12,1,"#d1d9d4"],[2,top,10,1,"#fffef6"],[1,top+1,12,1,"#7e99a1"],[0,top+2,14,1,"#57727d"],[10,top+1,2,1,tabs[index%3]]);
+        if (index === trays-1 && count%2 === 0) rects.push([2,top-1,10,1,"#fffef6"],[11,top-1,1,1,"#b5beb9"]);
+      }
+    } else {
+      rects.push([0,-5,14,5,"#4b675a"],[1,-5,12,4,"#82947a"]);
+      const sheets = Math.min(count,4);
+      for (let index=0;index<sheets;index++) {
+        const left=1+index*3, top=-7-index;
+        rects.push([left,top,4,-top-3,"#c2c9bc"],[left,top,3,-top-4,"#fffef5"],[left,top,2,1,tabs[index%3]]);
+      }
+      rects.push([0,-4,14,1,"#a3ae8b"],[1,-3,12,3,"#788e73"],[0,-4,1,4,"#4b675a"],[13,-4,1,4,"#4b675a"],[5,-2,4,1,"#d9decb"],[6,-2,2,1,"#59715e"]);
+    }
+    return rects;
+  }
+  function draw(canvas) {
+    const small = canvas.classList.contains("sample");
+    const close = canvas.classList.contains("zoom") || small;
+    const width = small ? 160 : 420, height = small ? 82 : close ? 130 : 260;
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = width*ratio; canvas.height=height*ratio;
+    const context = canvas.getContext("2d");
+    context.scale(ratio,ratio);
+    context.imageSmoothingEnabled=false;
+    const files=Number(canvas.dataset.count || count.value);
+    const scale=small?5:close?9:6;
+    const originX=close?(width-14*scale)/2:70, floor=small?68:close?108:225;
+    const rect=(left,top,width,height,color)=>{context.fillStyle=palette[color]||color;context.fillRect(originX+left*scale,floor+top*scale,width*scale,height*scale);};
+    context.fillStyle=close?"#e9ebe3":"#cbd7cd";context.fillRect(0,0,width,height);
+    if(!close) {
+      context.fillStyle="#aebfb4";context.fillRect(0,120,width,10);
+      context.fillStyle="#7a8b83";context.fillRect(0,130,width,130);
+      context.fillStyle="#667b73";context.fillRect(0,235,width,3);
+      [...chair,...desk].forEach(args=>rect(...args));
+      rect(22,-23,10,8,"#122532");
+      [[23,-22,4,1,"#7fd1b9"],[23,-20,6,1,"#f2b866"],[24,-18,5,1,"#9aa8ff"]].forEach(args=>rect(...args));
+      person.forEach(args=>rect(...args));
+      rect(16,-.2,16,.5,"#63756b");
+      fileBox(canvas.dataset.style,files).forEach(([left,top,width,height,color])=>rect(left+17,top,width,height,color));
+      context.fillStyle="#fff7df";context.fillRect(86,242,128,15);
+      context.fillStyle="#63705f";context.font="10px -apple-system, sans-serif";context.fillText("Agent 工位",95,253);
+    } else {
+      rect(-1,0,16,1,"#ccd2c4");
+      fileBox(canvas.dataset.style,files).forEach(args=>rect(...args));
+    }
+    if(files>0) {
+      const left=originX+(close?14:31)*scale+5, top=floor-15;
+      context.fillStyle=close?"#435747":"#f7f5e8";context.fillRect(left,top,20,14);
+      context.fillStyle=close?"#fffef5":"#435747";context.font="bold 10px -apple-system, sans-serif";context.fillText(String(files),left+6,top+10);
+    }
+  }
+  function render() {
+    document.querySelector("#count-value").value=`${count.value} 份`;
+    document.querySelectorAll("canvas").forEach(draw);
+  }
+  count.addEventListener("input",render);
+  document.querySelector("#reset").addEventListener("click",()=>{count.value=4;render();});
+  render();
+</script>
+</html>

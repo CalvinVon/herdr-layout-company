@@ -1,0 +1,6 @@
+{
+  "place": "none",
+  "title": "Workspace search",
+  "cloned_from": { "name": "picker", "version": "0.1.13" },
+  "overlay": { "kind": "popup", "at": "top", "offset": 40, "width": 600, "height": 0.8 }
+}

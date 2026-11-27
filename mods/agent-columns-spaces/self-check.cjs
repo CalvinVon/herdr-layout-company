@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const timeSource = fs.readFileSync(path.join(__dirname, 'session-time.js'), 'utf8');
-const { sessionTime, staleSession, projectActive, toggleProjects } = new Function(timeSource.replace(/^export /gm, '') + '\nreturn {sessionTime, staleSession, projectActive, toggleProjects};')();
+const { sessionTime, staleSession, projectActive } = new Function(timeSource.replace(/^export /gm, '') + '\nreturn {sessionTime, staleSession, projectActive};')();
 const now = new Date(2026, 10, 11, 12).getTime();
 assert.equal(sessionTime(new Date(2026, 10, 11, 9, 5).getTime(), now), '今天 09:05');
 assert.equal(sessionTime(new Date(2026, 10, 10, 8, 6).getTime(), now), '昨天 08:06');
@@ -35,10 +35,8 @@ members[0].program = { agent: true };
 assert.equal(projectActive(project, members, state, statuses, noCore, now), true, 'recent agent tab stays active when pane status is unavailable');
 project.tabs[0].changed_at = now - 86400001;
 assert.equal(projectActive(project, members, state, statuses, noCore, now), false, 'old tab activity does not emphasize the project');
-assert.deepEqual(toggleProjects([{ id: 'a' }, { id: 'b' }], { a: true, split: true }), { a: true, b: true, split: true });
-assert.deepEqual(toggleProjects([{ id: 'a' }, { id: 'b' }], { a: true, b: true, split: true }), { a: false, b: false, split: true });
 const titleSource = fs.readFileSync(path.join(__dirname, 'tab-title.js'), 'utf8');
-const { tabTitle } = new Function(titleSource.replace(/^export /gm, '') + '\nreturn {tabTitle};')();
+const { tabTitle, clean } = new Function(titleSource.replace(/^export /gm, '') + '\nreturn {tabTitle, clean};')();
 const titleTab = { id: 'session', name: '1', named: false };
 const titlePanes = [{ tab: 'session', terminal: 'lead', title: '◐ π > Office design', program: { agent: true, name: 'Oh My Pi (OMP)', key: 'omp' } }, { tab: 'session', terminal: 'worker', title: 'Worker task' }];
 assert.equal(tabTitle(titleTab, titlePanes), 'π > Office design');
@@ -55,7 +53,7 @@ const homeRules = new Function(homeSource.replace(/^export /gm, '') + '\nreturn 
 const rules = new Function(...Object.keys(homeRules), rulesSource.replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\nreturn {normalizePath,projectKey,parseWorktrees,resolveProject,bindingFor,primarySpace,worktreeFor,rememberWorktrees,launchProject,mergeBindings,consumeProjectRequest,homeTab,sessionTabs,retainSpace};')(...Object.values(homeRules));
 const source = fs.readFileSync(path.join(__dirname, 'path-groups.js'), 'utf8');
 /** @type {typeof import('./path-groups.js')} */
-const { groupPaths, parentAgent } = new Function(...Object.keys(rules), source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\nreturn {groupPaths,parentAgent};')(...Object.values(rules));
+const { groupPaths, parentAgent, paneDirectory, spaceAgents, directoryNodes, teamNodes, tabNodes } = new Function(...Object.keys(rules), source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\nreturn {groupPaths,parentAgent,paneDirectory,spaceAgents,directoryNodes,teamNodes,tabNodes};')(...Object.values(rules));
 /** @param {string} id @param {number} [changed_at] @returns {any} */
 const tab = (id, changed_at = 0) => ({ id, changed_at, settled: false });
 /** @param {string} id @param {any[]} tabs @param {string|null} [machine] @returns {any} */
@@ -68,6 +66,85 @@ const hierarchyStates = new Map([['lead', 'working'], ['child1', 'idle'], ['chil
 assert.equal(parentAgent(hierarchy, hierarchyRaw, hierarchyStates), hierarchy[0], 'ordinary terminals do not hide the agent parent');
 hierarchyRaw.get('child2').parent = 'another';
 assert.equal(parentAgent(hierarchy, hierarchyRaw, hierarchyStates), null, 'unrelated agents remain separate');
+// v4: three projections of the same pane set. Directory is flat (direct agents, no ancestor or
+// parent nesting), Team preserves parent-child, Default preserves native tab membership.
+const mainTree = { path: '/repo', branch: 'main', name: 'main' };
+const featTree = { path: '/worktrees/feature', branch: 'feature', name: 'feature' };
+const vp = (id, tabId, path, tree, extra = {}) => ({ pane: id, terminal: id, tab: tabId, cwd: path, workspaceFolder: path, gitTree: tree, worktree: null, ...extra });
+const v4Raw = new Map([
+  ['lead', { parent: null }], ['sub', { parent: 'lead' }], ['grand', { parent: 'sub' }],
+  ['other', { parent: null }], ['plain', { parent: null }], ['solo', { parent: null }],
+]);
+const v4Group = {
+  binding: { machine: null, root: '/repo', git: true, worktrees: [mainTree, featTree] },
+  entries: [
+    { tab: { id: 't1' }, members: [
+      vp('lead', 't1', '/repo', mainTree, { program: { agent: true } }),
+      vp('sub', 't1', '/worktrees/feature', featTree, { worktree: featTree }),
+      vp('grand', 't1', '/worktrees/feature', featTree, { worktree: featTree }),
+    ] },
+    { tab: { id: 't2' }, members: [
+      vp('other', 't2', '/repo', mainTree),
+      vp('plain', 't2', '/notes', null),
+    ] },
+    { tab: { id: 't3' }, members: [vp('solo', 't3', '/repo', mainTree)] },
+  ],
+};
+const agents = spaceAgents(v4Group, v4Raw);
+assert.equal(agents.length, 6, 'spaceAgents keeps every terminal-backed pane exactly once');
+assert.equal(paneDirectory(vp('lead', 't1', '/repo', mainTree)).kind, null, 'main checkout directories have no extra badge');
+assert.equal(paneDirectory(vp('sub', 't1', '/worktrees/feature', featTree, { worktree: featTree })).kind, 'Worktree');
+assert.equal(paneDirectory(vp('plain', 't2', '/notes', null)).kind, '普通目录');
+const dirs = directoryNodes(v4Group, v4Raw);
+assert.deepEqual(dirs.map(d => d.path), ['/repo', '/worktrees/feature', '/notes'], 'directory groups are flat siblings in first-seen order');
+assert.equal(dirs[0].children.map(a => a.agent.terminal).sort().join(','), 'lead,other,solo', 'same-directory agents across tabs share one group');
+assert.equal(dirs[1].children.map(a => a.agent.terminal).sort().join(','), 'grand,sub', 'same-tab different-directory agents split into their own group');
+assert.equal(dirs[2].children.map(a => a.agent.terminal).join(','), 'plain', 'non-Git directory is its own group');
+assert.ok(dirs.every(d => d.children.every(a => a.children.length === 0)), 'directory view is flat, no parent/child nesting');
+const teams = teamNodes(v4Group, v4Raw);
+assert.deepEqual(teams.map(t => t.agent.terminal).sort(), ['lead', 'other', 'plain', 'solo'], 'team roots are parentless agents');
+const leadTeam = teams.find(t => t.agent.terminal === 'lead');
+assert.deepEqual(leadTeam.children.map(c => c.agent.terminal), ['sub'], 'child nests under its parent');
+assert.deepEqual(leadTeam.children[0].children.map(c => c.agent.terminal), ['grand'], 'grandchild nests deeper (3 levels)');
+const tabs = tabNodes(v4Group, v4Raw);
+assert.deepEqual(tabs.map(t => t.tab.id), ['t1', 't2', 't3'], 'default view keeps native tab order');
+assert.deepEqual(tabs[0].children.map(a => a.agent.terminal), ['lead', 'sub', 'grand'], 'default view keeps native pane order');
+const flatten = node => node.kind === 'agent' ? [node.agent.terminal, ...node.children.flatMap(flatten)] : node.children.flatMap(flatten);
+for (const view of [dirs, teams, tabs]) {
+  assert.deepEqual(view.flatMap(flatten).sort(), agents.map(a => a.terminal).sort(), 'every view preserves the exact agent set, no loss or duplication');
+}
+const containsTerminal = (node, terminal) => node.kind === 'agent'
+  ? (node.agent.terminal === terminal || node.children.some(child => containsTerminal(child, terminal)))
+  : node.children.some(child => containsTerminal(child, terminal));
+// Unique highlight: a focused agent's terminal lives in exactly one block per view, so the
+// weak highlight can never tint two directories/teams/tabs at once (same-tab cross-directory included).
+for (const terminal of agents.map(a => a.terminal)) {
+  for (const view of [dirs, teams, tabs]) {
+    assert.equal(view.filter(node => containsTerminal(node, terminal)).length, 1, `terminal ${terminal} belongs to exactly one block per view`);
+  }
+}
+const modSpace = space('mods', [tab('home-only'), { ...tab('docs-before'), name: 'Docs', named: true }, tab('mixed'), tab('docs-after')]);
+const modPanes = [
+  { pane: 'home-only', tab: 'home-only', terminal: null, mod: 'space-home' },
+  { pane: 'docs-before', tab: 'docs-before', terminal: null, mod: 'files' },
+  pane('mixed-terminal', 'mixed'), { pane: 'mixed-mod', tab: 'mixed', terminal: null, mod: 'files' },
+  { pane: 'docs-after', tab: 'docs-after', terminal: null, mod: 'editor' },
+];
+const modGroup = groupPaths([modSpace], modPanes, {}, new Map())[0];
+for (const projection of [directoryNodes, teamNodes, tabNodes]) {
+  const nodes = projection(modGroup, new Map());
+  assert.deepEqual(nodes.filter(node => node.kind === 'tab' && !node.children.length).map(node => node.tab.id), ['docs-before', 'docs-after'], 'every view retains mod-only tabs without duplicating mixed tabs or the dedicated homepage');
+  assert.deepEqual(nodes.flatMap(flatten), ['mixed-terminal'], 'mod tabs introduce no empty directory or duplicate terminal');
+  assert(nodes.every(node => node.kind !== 'directory' || node.children.length > 0));
+}
+assert.deepEqual(tabNodes(modGroup, new Map()).map(node => node.tab.id), ['docs-before', 'mixed', 'docs-after'], 'default keeps mod-only tabs in original native tab order');
+const nativePanes = [pane('native-shell', 'native'), { ...pane('native-child', 'native'), status: 'working', program: { agent: true } }, { ...pane('native-owner', 'native'), status: 'idle', program: { agent: true } }];
+const nativeRaw = new Map([['native-shell', { status_ms: 100 }], ['native-child', { parent: 'native-owner', status_ms: 300 }], ['native-owner', { status_ms: 200 }]]);
+const nativeOrder = () => tabNodes(groupPaths([space('native-space', [tab('native')])], nativePanes, {}, nativeRaw)[0], nativeRaw)[0].children.map(node => node.agent.terminal);
+assert.deepEqual(nativeOrder(), ['native-shell', 'native-child', 'native-owner'], 'groupPaths through default projection preserves native pane order across roles and statuses');
+nativeRaw.get('native-owner').status_ms = 900;
+nativeRaw.get('native-child').status_ms = 0;
+assert.deepEqual(nativeOrder(), ['native-shell', 'native-child', 'native-owner'], 'status timestamp updates cannot move default rows');
 const spaces = [space('a', [tab('a', 100), tab('split', 200)]), space('b', [tab('b', 300)]), space('remote', [tab('remote', 400)], 'server')];
 const panes = [pane('a', 'a'), pane('split-main', 'split'), pane('split-feature', 'split', '/worktrees/feature'), pane('b', 'b'), pane('remote', 'remote')];
 const trees = [{ path: '/repo', branch: 'main', name: 'main' }, { path: '/worktrees/feature', branch: 'feature', name: 'feature' }];
@@ -81,8 +158,150 @@ assert.deepEqual(groups.map(g => [g.space.id, g.machine, g.folder]), [['a', null
 assert.deepEqual(groups.map(g => g.entries.map(e => e.tab.id)), [['a', 'split'], ['b'], ['remote']]);
 assert.deepEqual(groups[0].entries.map(e => e.tab.id), spaces[0].tabs.map(t => t.id), 'sidebar rows follow tab order');
 assert.deepEqual(groupPaths([...spaces].reverse(), panes, bindings, raw).map(g => g.id), ['remote', 'b', 'a']);
-assert.deepEqual(groups[0].entries[1].members.map(p => p.pane), ['split-feature', 'split-main']);
-assert.deepEqual(new Set(groups[0].entries[1].worktrees.keys()), new Set(['/worktrees/feature', '/repo']));
+assert.deepEqual(groups[0].entries[1].members.map(p => p.pane), ['split-main', 'split-feature']);
+assert.deepEqual(new Set(groups[0].entries[1].worktrees.keys()), new Set(['/worktrees/feature']));
+assert.equal(groups[0].entries[1].members.find(p => p.pane === 'split-main').worktree, null, 'a main checkout stays primary when linked worktrees exist');
+assert.equal(groups[0].entries[1].members.find(p => p.pane === 'split-feature').worktree.path, '/worktrees/feature');
+const otherTrees = [{ path: '/second', branch: 'feature_fjh', name: 'feature_fjh' }, { path: '/second-linked', branch: '', name: 'second-linked' }];
+const folderPanes = [...panes, pane('second-main', 'split', '/second'), pane('second-linked', 'split', '/second-linked/subdir'), pane('plain', 'split', '/notes')];
+const folderRaw = new Map([...raw, ...folderPanes.slice(panes.length).map(p => [p.terminal, { address: p.terminal, cwd: p.cwd }])]);
+const folderBindings = { a: { ...bindings.a, folders: [
+  { root: '/repo', git: true, worktrees: trees },
+  { root: '/second', git: true, worktrees: otherTrees },
+  { root: '/notes', git: false, worktrees: [{ path: '/notes', branch: '', name: 'notes' }] },
+] } };
+const folderGroup = groupPaths([spaces[0]], folderPanes, folderBindings, folderRaw)[0];
+const folderMembers = folderGroup.entries.flatMap(entry => entry.members);
+assert.equal(folderMembers.find(p => p.terminal === 'second-main').worktree, null, 'each repository in a multi-folder Space has its own main checkout');
+assert.equal(folderMembers.find(p => p.terminal === 'second-linked').worktree.path, '/second-linked', 'detached linked worktrees keep their identity inside subdirectories');
+assert.equal(folderMembers.find(p => p.terminal === 'plain').worktree, null, 'non-Git folders never become worktrees');
+assert.deepEqual([...folderGroup.entries.find(entry => entry.tab.id === 'split').worktrees.keys()].sort(), ['/second-linked', '/worktrees/feature']);
+const folderDirs = directoryNodes(folderGroup, folderRaw);
+assert.equal(folderDirs.find(dir => dir.path === '/second').kindTag, null, 'main checkouts in multi-folder Spaces have no extra badge');
+assert.equal(folderDirs.find(dir => dir.path === '/second-linked/subdir').kindTag, 'Worktree');
+assert.equal(folderDirs.find(dir => dir.path === '/second-linked/subdir').worktree.path, '/second-linked', 'directory hover identifies the worktree root rather than just its launch subdirectory');
+const teamPanes = v4Group.entries.flatMap(entry => entry.members);
+const teamSpace = space('team-space', v4Group.entries.map(entry => entry.tab));
+let viewSpaces = [teamSpace], viewPanes = teamPanes;
+function element(asset) {
+  const state = { props: asset ? { asset } : {}, nodes: [] };
+  let proxy;
+  proxy = new Proxy(state, { get(target, key) {
+    if (key in target) return target[key];
+    return (...args) => {
+      if (key === 'child') target.nodes.push(args[0]);
+      else if (key === 'children') target.nodes.push(...args[0]);
+      else if (key === 'when') { if (args[0]) args[1](proxy); }
+      else target.props[key] = args.length ? args[0] : true;
+      return proxy;
+    };
+  }});
+  return proxy;
+}
+const elements = node => node?.nodes ? [node, ...node.nodes.flatMap(elements)] : [];
+const retainedSource = fs.readFileSync(path.join(__dirname, 'retained-parts.js'), 'utf8');
+const { RetainedParts } = new Function('View', 'div', retainedSource.replace(/^import .*;\n/gm, '').replace(/^export /gm, '') + '\nreturn {RetainedParts};')(class {}, element);
+const sidebarCommands = [];
+const viewState = new Map([
+  ['agent-columns.view', 'directory'],
+  ['agent-columns.view-folded', { 'team-space::directory::/repo': true, 'team-space::agent::lead': false }],
+  ['workspace.project-bindings', { 'team-space': bindings.a }],
+]);
+const viewApi = {
+  View: class {}, div: element, svg: element, image: element, h_flex: element, v_flex: element,
+  groupPaths, teamNodes, directoryNodes, tabNodes, ...homeRules, tabTitle, clean, sessionTime, staleSession, projectActive,
+  theme: () => ({ chrome: '#101010', accent: '#22a99a', working: '#5b8def', done: '#3fae6a' }), run: (name, args) => sidebarCommands.push([name, args]),
+  spaces: () => viewSpaces, panes: () => viewPanes,
+  terminals: () => viewPanes.filter(p => p.terminal).map(p => ({ address: p.terminal, cwd: p.cwd, ...v4Raw.get(p.terminal) })),
+  shared: key => viewState.get(key), setShared: (key, value) => viewState.set(key, value),
+};
+const sidebarSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8').replace(/^import .*;\n/gm, '').replace('export default class ', 'class ');
+const Sidebar = new Function(...Object.keys(viewApi), `${sidebarSource}\nreturn SpacesTabs;`)(...Object.values(viewApi));
+const sidebar = new Sidebar();
+sidebar.setMode('team');
+assert.equal(viewState.get('agent-columns.view'), 'team');
+assert.deepEqual(viewState.get('agent-columns.view-folded'), { 'team-space::directory::/repo': true, 'team-space::agent::lead': true }, 'entering Team folds the owner with children, preserving other views and standalone sessions');
+viewState.get('agent-columns.view-folded')['team-space::agent::lead'] = false;
+sidebar.setMode('team');
+assert.equal(viewState.get('agent-columns.view-folded')['team-space::agent::lead'], false, 'staying in Team preserves manual expansion');
+sidebar.setMode('default');
+assert.equal(viewState.get('agent-columns.view-folded')['team-space::agent::lead'], false, 'leaving Team preserves existing fold states');
+sidebar.setMode('team');
+assert.equal(viewState.get('agent-columns.view-folded')['team-space::agent::lead'], true, 're-entering Team restores the owner-only default');
+for (const mode of ['directory', 'team', 'default']) {
+  viewState.set('agent-columns.view', mode);
+  viewState.set('agent-columns.fold-step', 0);
+  for (let round = 0; round < 2; round++) {
+    viewState.set('agent-columns.spaces-folded', { 'team-space': true });
+    viewState.set('agent-columns.view-fold-all', true);
+    sidebar.cycleFold();
+    const group = groupPaths([teamSpace], teamPanes, { 'team-space': bindings.a }, new Map(viewApi.terminals().map(t => [t.address, t])))[0];
+    const nodes = (mode === 'team' ? teamNodes : mode === 'default' ? tabNodes : directoryNodes)(group, v4Raw);
+    assert.equal(viewState.get('agent-columns.spaces-folded')['team-space'], false, 'first click exposes the logical group level');
+    assert.equal(viewState.get('agent-columns.view-fold-all'), false, 'group disclosure remains individually usable');
+    for (const node of nodes.filter(node => node.children.length)) assert.equal(viewState.get('agent-columns.view-folded')[`${group.id}::${node.kind}::${node.key}`], true, `${mode} first click folds its logical groups`);
+    assert.equal(viewState.get('agent-columns.fold-step'), 1);
+    sidebar.cycleFold();
+    assert.equal(viewState.get('agent-columns.spaces-folded')['team-space'], true, 'second click folds every Space');
+    assert.equal(viewState.get('agent-columns.fold-step'), 2);
+    sidebar.cycleFold();
+    assert.equal(viewState.get('agent-columns.spaces-folded')['team-space'], false, 'third click expands every Space');
+    assert.deepEqual(viewState.get('agent-columns.view-folded'), {}, 'third click expands all groups and descendants');
+    assert.equal(viewState.get('agent-columns.fold-step'), 0, 'the three-step cycle repeats');
+  }
+}
+viewState.set('agent-columns.fold-step', 2);
+sidebar.setMode('directory');
+assert.equal(viewState.get('agent-columns.fold-step'), 0, 'switching views starts at its own logical group level');
+sidebar.width = 320;
+sidebar.parts = new RetainedParts();
+sidebar.workingSince = {};
+sidebar.dragFocus = {};
+teamPanes[0].status = 'idle';
+teamPanes[1].status = 'working';
+const idleAt = Date.now() - 60000;
+v4Raw.get('lead').status_ms = idleAt;
+viewState.set('agent-columns.view', 'team');
+viewState.set('agent-columns.spaces-folded', {});
+viewState.set('agent-columns.view-fold-all', false);
+for (const closed of [true, false]) {
+  viewState.set('agent-columns.view-folded', { 'team-space::agent::lead': closed });
+  const rendered = sidebar.render(), rows = elements(rendered);
+  const owner = rows.find(node => node.props.id === 'agent-team-space-lead');
+  assert(owner);
+  const ownerElements = elements(owner);
+  assert.equal(ownerElements.some(node => node.props.id === 'sweep-agent-lead'), closed, 'idle owner summarizes working descendants only while folded');
+  assert.equal(ownerElements.some(node => node.props.id === 'status-dot-agent-lead'), false, 'child activity does not replace the owner idle status');
+  assert.equal(ownerElements.find(node => node.props.tooltip === '最近状态更新时间')?.nodes[0], sessionTime(idleAt, Date.now()), 'owner retains its own idle timestamp in either fold state');
+  assert.equal(rows.some(node => node.props.id === 'agent-team-space-sub'), !closed, 'expansion exposes the child session');
+  assert.equal(rows.some(node => node.props.id === 'sweep-agent-sub'), !closed, 'expanded working child carries its own activity sweep');
+  assert.equal(sidebar.workingSince.lead, undefined, 'child work does not start an owner working timer');
+}
+viewSpaces = [modSpace]; viewPanes = modPanes;
+viewState.set('workspace.project-bindings', {});
+viewState.set('agent-columns.view-folded', {});
+for (const mode of ['directory', 'team', 'default']) {
+  viewState.set('agent-columns.view', mode);
+  const rendered = sidebar.render(), rows = elements(rendered);
+  for (const id of ['docs-before', 'docs-after']) {
+    const row = rows.find(node => node.props.id === `grp-mods-tab-${id}`);
+    assert(row, `${mode} renders a reachable mod-only tab`);
+    assert.equal(elements(row).some(node => node.props.asset?.includes('chevron-')), false, 'a mod-only tab has no futile disclosure arrow');
+    assert.equal(elements(row).some(node => node.props.tooltip === '0 会话'), false, 'a mod-only tab has no empty session count');
+    row.props.on_click({}, { stop_propagation() {} });
+    assert.deepEqual(sidebarCommands.slice(-2), [['space.select', { id: modSpace.id }], ['tab.select', { id }]], 'clicking a mod-only row selects its original Space and tab');
+    assert.deepEqual(viewState.get('agent-columns.view-folded'), {}, 'mod-only navigation does not create an empty folded branch');
+  }
+  assert.equal(rows.filter(node => node.props.id === 'agent-mods-mixed-terminal').length, 1, 'mixed tabs render their terminal once');
+  assert.equal(rows.some(node => node.props.id === 'grp-mods-tab-home-only'), false, 'dedicated homepage stays outside sidebar projections');
+  assert.equal(rendered.props.pb + rows.find(node => node.props.id === 'spaces-header').props.h + rows.find(node => node.props.id === 'view-mode').props.h + rows.find(node => node.props.id === 'view-mode').props.mb, 72, 'fixed Spaces controls require 72px');
+}
+const layoutNodes = node => [node, ...(node.children ?? []).flatMap(layoutNodes)];
+for (const name of ['office', 'agent-columns']) {
+  const blocks = layoutNodes(JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'layouts', `${name}.json`), 'utf8')));
+  assert.equal(blocks.find(node => node.id === 'spaces').min, 72, `${name} keeps both Spaces control rows visible at minimum size`);
+  assert.equal(blocks.find(node => node.id === 'agents').min, 40, `${name} preserves the Agents minimum`);
+}
 const singleTreeBindings = { a: { ...bindings.a, worktrees: [trees[0]] } };
 const singleTreePane = groupPaths([spaces[0]], panes, singleTreeBindings, raw)[0].entries.find(entry => entry.tab.id === 'a').members[0];
 assert.equal(singleTreePane.worktree, null);
@@ -271,6 +490,9 @@ async function gitProjectChecks() {
     assert.deepEqual(multiBinding.folders.map(item => item.path), [fs.realpathSync(repo), fs.realpathSync(plain), fs.realpathSync(nested)]);
     await rules.launchProject({ action: 'new-tab', space: multi.id, folder: nested, argv: ['fixture-agent'] }, api, registry);
     assert.equal(scenePanes.at(-1).cwd, fs.realpathSync(nested), '选中的子文件夹不能被替换为 Git 根目录');
+    const unlistedSubdir = path.join(repo, 'unlisted-launch-subdir'); fs.mkdirSync(unlistedSubdir);
+    await rules.launchProject({ action: 'new-tab', space: multi.id, folder: unlistedSubdir }, api, registry);
+    assert.equal(scenePanes.at(-1).cwd, fs.realpathSync(unlistedSubdir), 'an unlisted subdirectory in a registered Git project retains its launch path');
     const beforeEdit = JSON.stringify({ scene, scenePanes });
     const previousBinding = JSON.stringify(registry[multi.id]);
     await assert.rejects(rules.launchProject({ action: 'update-folders', space: multi.id, folders: [plain, path.join(temp, 'missing')] }, api, registry));

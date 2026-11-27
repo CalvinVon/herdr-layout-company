@@ -7,7 +7,7 @@ const script = path.join(__dirname, 'agent-publish.cjs');
 assert.ok(fs.existsSync(script), 'Agent publication command must exist');
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'office-publish-check-'));
 try {
-  const env = { ...process.env, HERDR_APP_HOME: home };
+  const env = { ...process.env, HERDR_APP_HOME: home, HC_TERMINAL_ID: '' };
   const run = (...args) => spawnSync(process.execPath, [script, ...args], { env, encoding: 'utf8' });
   const target = path.join(home, 'report.html');
   fs.writeFileSync(target, '<h1>Report</h1>');
@@ -35,5 +35,26 @@ try {
   assert.equal(JSON.parse(automatic.stdout).roomKey, 'room-b');
   fs.writeFileSync(path.join(home, 'shared.json'), JSON.stringify({ 'workspace.office-groups': [membership, { ...membership, projectKey: 'room-c' }] }));
   assert.notEqual(run('pin', '--title', '不明确', '--text', '不能乱归属').status, 0);
+  const bin = path.join(home, 'bin');
+  fs.mkdirSync(bin);
+  const fixture = path.join(home, 'terminals.json');
+  const identities = { child: { state: 'live', parent: 'parent', created_ms: 101 }, parent: { state: 'live', parent: null, created_ms: 99 } };
+  fs.writeFileSync(fixture, JSON.stringify(identities));
+  fs.writeFileSync(path.join(bin, 'hc'), `#!${process.execPath}\nconst fs = require('node:fs'); const rows = JSON.parse(fs.readFileSync(process.env.HC_FIXTURE, 'utf8')); const row = process.argv[2] === 'get' && rows[process.argv[3]]; if (!row) process.exit(1); process.stdout.write(JSON.stringify(row));\n`, { mode: 0o700 });
+  env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+  env.HC_FIXTURE = fixture;
+  env.HC_TERMINAL_ID = 'child';
+  const parentRoom = { id: 'space-a', projectKey: 'room-a', machine: null, members: [{ terminal: 'parent', pane: 'parent-pane' }] };
+  fs.writeFileSync(path.join(home, 'shared.json'), JSON.stringify({ 'workspace.office-groups': [parentRoom] }));
+  const childPin = run('pin', '--title', '子任务报告', '--file', target);
+  assert.equal(childPin.status, 0, childPin.stderr);
+  const childFile = JSON.parse(childPin.stdout);
+  assert.deepEqual(childFile.author, { terminal: 'child', createdMs: 101 });
+  assert.deepEqual(childFile.workstation, { terminal: 'parent', createdMs: 99, space: 'space-a' });
+  const override = JSON.parse(run('pin', '--room', 'other-room', '--title', '显式项目', '--file', target).stdout);
+  assert.equal(override.workstation, undefined);
+  identities.child.created_ms = undefined;
+  fs.writeFileSync(fixture, JSON.stringify(identities));
+  assert.notEqual(run('pin', '--title', '未知身份', '--file', target).status, 0);
   console.log('Agent publication, room isolation and source preservation checks passed.');
 } finally { fs.rmSync(home, { recursive: true, force: true }); }

@@ -59,6 +59,7 @@ export default class SpaceHome extends View {
     const binding = shared("workspace.project-bindings")?.[space?.id];
     const directories = binding?.folders ?? (binding ? [{ ...binding, path: binding.initialFolder ?? binding.root }] : []);
     const folders = [...new Map(directories.flatMap(item => [item, ...(item.worktrees ?? []).filter(tree => tree.path !== item.path).map(tree => ({ ...tree, worktree: true }))]).map(item => [item.path, item])).values()];
+    if (target.folder && !folders.some(item => item.path === target.folder)) folders.push({ path: target.folder });
     const folder = folders.find(item => item.path === this.folder)?.path ?? folders[0]?.path;
     const installed = (this.agents ?? []).filter(agent => agent.installed);
     const recentKey = shared("workspace.recent-agents")?.[space?.machine ?? ""];
@@ -68,7 +69,6 @@ export default class SpaceHome extends View {
     const padding = (this.width ?? 900) < 600 ? 20 : 28;
     const contentWidth = Math.max(0, Math.min((this.width ?? 900) - padding * 2, 780));
     const columns = contentWidth >= 640 ? 4 : contentWidth >= 320 ? 2 : 1;
-    const cardWidth = (contentWidth - (columns - 1) * 12) / columns;
     const colors = [t.ansi4, t.ansi5, t.ansi3, t.ansi2];
     const manage = () => openOverlay({ mod: "space-folders", kind: "dialog", width: 560, height: 500, props: { edit: true, space: space?.id } });
     return v_flex().id("space-home").size_full().min_w(0).min_h(0).overflow_y_scrollbar()
@@ -113,8 +113,10 @@ export default class SpaceHome extends View {
           .child(div().text_size(12).font_semibold().child("快速启动"))
           .child(div().id("space-home-agents").text_size(11).text_color(t.accent).cursor_pointer().child(this.showAgents ? "收起 Agent" : "选择其他 Agent…")
             .on_click((_e, cx) => { this.showAgents = !this.showAgents; cx.notify(); })))
-        .child(h_flex().w_full().flex_wrap().gap(12).children(tools.map((tool, index) =>
-          v_flex().id(`space-home-tool-${tool.id}`).w(cardWidth).min_w(0).h(148).flex_none().p(16).gap(10)
+        .child(v_flex().w_full().gap(12).children(Array.from({ length: Math.ceil(tools.length / columns) }, (_, row) =>
+          h_flex().w_full().gap(12).children(tools.slice(row * columns, (row + 1) * columns).map((tool, offset) => {
+            const index = row * columns + offset;
+            return v_flex().id(`space-home-tool-${tool.id}`).flex_1().min_w(0).h(148).p(16).gap(10)
             .border(1).border_color(t.border).rounded(9).bg(t.background).cursor_pointer()
             .opacity(this.pending ? 0.55 : 1).hover(el => el.bg(t.raised).border_color(colors[index])).on_click((_e, cx) => this.launch(tool, folder, cx))
             .child(div().size(32).flex_none().rounded(8).bg(t.raised).flex().items_center().justify_center()
@@ -123,7 +125,8 @@ export default class SpaceHome extends View {
               .child(div().text_size(13).font_semibold().child(tool.name))
               .child(div().text_size(11).text_color(t.muted).child(tool.detail)))
             .child(h_flex().flex_1().items_end().justify_between().text_size(10).text_color(t.dim)
-              .child(div().child(tool.hint)).child(div().text_color(colors[index]).child("↗"))))))
+              .child(div().child(tool.hint)).child(div().text_color(colors[index]).child("↗")));
+          })))))
         .when(Boolean(this.showAgents), el => el.child(v_flex().gap(10)
           .child(h_flex().items_center().gap(8)
             .child(div().text_size(12).font_semibold().child("全部 Agent"))

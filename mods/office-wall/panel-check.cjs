@@ -111,6 +111,31 @@ const find = (node, id) => node?.props?.id === id ? node : (node?.nodes ?? []).m
   find(generated.render(), 'pin-0').props.on_click({}, cx); await flush();
   assert.equal(generated.pins[0].url, 'http://192.0.2.1:8081/');
   assert.equal(generated.pins[0].qrKind, 'generated');
+  target = { roomKey: 'local:delta', roomName: 'Delta', fileIds: ['desk-a', 'desk-a-pinned'], services: [
+    { id: 'desk-a', kind: 'file', name: 'A 方案', path: '/tmp/a.md' },
+    { id: 'desk-b', kind: 'file', name: 'B 方案', path: '/tmp/b.pdf' },
+  ] };
+  const documents = new Panel(); documents.init({}, cx); await flush();
+  documents.pins.push(
+    { id: 'desk-a-pinned', kind: 'file', name: 'A 报告', path: '/tmp/a.html', url: '' },
+    { id: 'desk-b-pinned', kind: 'file', name: 'B 报告', path: '/tmp/b.html', url: '' },
+    { id: 'project-note', kind: 'note', name: '项目便签', text: '共享内容', url: '' },
+  );
+  const documentView = documents.render(), documentLabels = labels(documentView);
+  assert.ok(documentLabels.includes('工位文档'));
+  assert.ok(documentLabels.includes('Delta · 2 项'));
+  assert.ok(documentLabels.includes('A 方案'));
+  assert.ok(documentLabels.includes('A 报告'));
+  assert.equal(documentLabels.includes('B 方案'), false);
+  assert.equal(documentLabels.includes('B 报告'), false);
+  assert.equal(documentLabels.includes('项目便签'), false);
+  for (const id of ['wall-add', 'wall-add-note', 'wall-add-file']) assert.equal(find(documentView, id), undefined);
+  find(documentView, 'file-open-0').props.on_click({}, cx); await flush();
+  assert.deepEqual(opened.at(-1), { command: 'open', args: ['/tmp/a.md'] });
+  target = { ...target, fileIds: [] };
+  const emptyDocuments = new Panel(); emptyDocuments.init({}, cx); await flush();
+  assert.ok(labels(emptyDocuments.render()).includes('暂无工位文档。'));
+  assert.equal(find(emptyDocuments.render(), 'wall-card-0'), undefined);
   files.set('/test/office-wall-pins.json', '{invalid');
   const broken = new Panel(); broken.init({}, cx); await flush();
   assert.equal(broken.loaded, false);

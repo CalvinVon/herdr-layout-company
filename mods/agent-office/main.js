@@ -14,6 +14,7 @@ import * as D from "./decor.js";
 import * as T from "./themes.js";
 import { ProjectSelection, projectRooms, roomState, ROOM_STATE_KEYS } from "./projects.js";
 import * as S from "./wall-services.js";
+import { artifactOwner, verifyArtifactOwners } from "./artifacts.js";
 
 // Location is rounded before requesting the current conditions from Open-Meteo.
 const WEATHER = true;
@@ -228,6 +229,11 @@ export default class Office extends View {
           const data = JSON.parse(published.stdout);
           if (!data?.rooms || typeof data.rooms !== "object" || Array.isArray(data.rooms)) throw new Error("Agent 发布数据无效");
           this.wallPublications = data.rooms;
+          this.wallIdentities = await verifyArtifactOwners([...Object.values(data.rooms).flat(), ...Object.values(this.wallPins).flat()], all, async address => {
+            const result = await exec("hc", ["get", address, "--json"]);
+            if (result.code !== 0) throw new Error("无法核验文件作者");
+            return JSON.parse(result.stdout);
+          });
           this.wallPublicationError = null;
         } catch (error) { this.wallPublicationError = String(error); }
         const candidates = [];
@@ -335,7 +341,8 @@ export default class Office extends View {
     }
   }
 
-  openWallFile(path, cx) {
+  openWallFile(card, cx) {
+    const path = typeof card === "string" ? card : card.path;
     if (typeof path !== "string" || !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(path)) return;
     const platform = window()?.platform, command = platform === "windows" ? "rundll32" : platform === "macos" ? "open" : "xdg-open";
     const args = platform === "windows" ? ["url.dll,FileProtocolHandler", path] : [path];
@@ -345,6 +352,14 @@ export default class Office extends View {
     });
   }
 
+  openArtifactBag(files, cx) {
+    if (files.length === 1) { this.openWallFile(files[0], cx); return; }
+    const project = this.currentProject;
+    openOverlay({ mod: "office-wall", kind: "dialog", width: 760, height: 650, props: {
+      roomKey: project.projectKey, roomName: project.name, space: project.id,
+      services: files, serviceFile: this.wallFile, fileIds: files.map(file => file.id),
+    } });
+  }
 
   openWallGoal(card) {
     const project = this.currentProject;
@@ -489,6 +504,13 @@ export default class Office extends View {
     const wallServices = [...Object.values(this.wallCards[project.projectKey] ?? {}), ...(this.wallExtras[project.projectKey] ?? [])];
     const wallPinned = Array.isArray(this.wallPins[project.projectKey]) ? this.wallPins[project.projectKey] : [];
     const wallCards = [...wallServices, ...wallPinned.filter(pin => !wallServices.some(card => card.id === pin?.id))];
+    this.artifactFiles = new Map();
+    for (const card of wallCards) {
+      const owner = artifactOwner(card, project, all, this.wallIdentities);
+      if (!owner) continue;
+      if (!this.artifactFiles.has(owner)) this.artifactFiles.set(owner, []);
+      this.artifactFiles.get(owner).push(card);
+    }
     const wallBoardWidth = 412 + wallCards.filter(card => card.kind !== "goal" && card.kind !== "file").length * 190;
     const canvasWidth = Math.max(g.contentWidth, g.wallLeft + g.wallWidth + wallBoardWidth + 24);
     this.seat(here, g.door, cx);
@@ -499,8 +521,6 @@ export default class Office extends View {
     for (const a of here) byDesk[this.desk[a.address]] = a;
     const tabs = {};
     for (const s of spaces()) for (const t of s.tabs ?? []) tabs[t.id] = t;
-    const branches = {};
-    for (const p of panes()) branches[p.pane] = p.branch;
 
     // The pizza: the courier walks in, leaves it on the counter, and walks out.
     const party = this.party;
@@ -543,7 +563,7 @@ export default class Office extends View {
       const pos = g.deskPos(i);
       if (!visible(pos.x)) return [];
       const a = byDesk[i];
-      return [this.deskAt(i, pos, g, a, a && tabs[a.tab], a && branches[a.pane])];
+      return [this.deskAt(i, pos, g, a, a && tabs[a.tab])];
     });
 
     const hour = this.now.getHours();
@@ -706,9 +726,7 @@ export default class Office extends View {
   }
 
 
-  // A desk with its chair, monitor, bell and lamp, the branch on a sticky note, and the
-  // nameplate of whoever sits there.
-  deskAt(i, pos, g, a, tab, branch) {
+  deskAt(i, pos, g, a, tab) {
     const P = g.P;
     const st = a?.status;
     const away = Boolean(a) && this.at[a.address]?.spot !== "desk";
@@ -724,7 +742,7 @@ export default class Office extends View {
         ...A.rects(A.DESK.chair, pal), ...A.rects(A.DESK.desk, pal),
         ...(overtime ? A.rects(A.MUG_PILE, pal) : []),
         this.screen(away ? "idle" : st, away, P, Boolean(a?.focused)),
-        ...(branch ? [this.sticky(branch, P)] : []),
+        ...(a ? this.documentBox(a, P) : []),
         A.layer(A.DESK.bell, pal, A.SLOT).when(done, (el) => el.loop("left", { from: -1.5, to: 1.5, period: 160 })),
         ...(done ? [this.ding(P), ...this.confetti(P, a.address)] : []),
         ...(plate ? [plate.absolute().left(6 * P).top(A.BOX * P + 6)] : []),
@@ -745,10 +763,30 @@ export default class Office extends View {
         .loop("left", { from: P, to: P * 8, period: 5000 })));
   }
 
-  sticky(branch, P) {
-    return div().absolute().left(18 * P).top((A.BOX - 26) * P).w(10 * P).h(5 * P).px(2).bg("#f6e27a")
-      .border_1().border_color("#d8bf4a").flex().items_center().overflow_hidden()
-      .text_size(7).text_color("#4a3a10").child(div().truncate().child(branch));
+  documentBox(agent, P) {
+    const files = this.artifactFiles?.get(agent.address) ?? [];
+    if (!files.length) return [];
+    const colors = { md: "#78a5d1", markdown: "#78a5d1", html: "#d19a69", htm: "#d19a69", pdf: "#c7828e" };
+    const papers = files.slice(0, 5).map((file, index) => {
+      const basename = file.path.split(/[\\/]/).pop();
+      const extension = basename.includes(".") ? basename.split(".").pop().toLowerCase() : "";
+      return div().id(`artifact-paper-${agent.address}-${file.id}`).absolute().left((1 + index % 2) * P).top((4 - index) * P)
+        .w(12 * P).h(P).bg("#fffef5")
+        .child(div().absolute().right(0).top(0).w(P).h(P).bg("#b5beb9"))
+        .child(div().absolute().left(0).bottom(0).w(11 * P).h(P / 4).bg("#b5beb9"))
+        .child(div().id(`artifact-type-${agent.address}-${file.id}`).absolute().right(P).top(0).w(2 * P).h(P * 0.75).bg(colors[extension] ?? "#a3b294"));
+    });
+    const draw = rects => rects.map(([left, top, width, height, color]) =>
+      div().absolute().left(left * P).top((10 + top) * P).w(width * P).h(height * P).bg(color));
+    return [div().id(`artifact-bag-${agent.address}`).absolute().left(10 * P).top((A.BOX - 10) * P).w(14 * P).h(10 * P)
+      .cursor_pointer()
+      .tooltip(`${files.length} 份文件\n${files.map(file => `${file.name || file.path.split(/[\\/]/).pop()}\n${file.path}`).join("\n")}`)
+      .accessibility_label(`${files.length} 份文件，点击打开文件箱`)
+      .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+      .on_click((_event, cx) => { cx.stop_propagation(); this.openArtifactBag(files, cx); })
+      .children([...draw(A.ARTIFACT_BOX.back), ...papers, ...draw(A.ARTIFACT_BOX.front)])
+      .child(div().id(`artifact-count-${agent.address}`).absolute().left(3 * P).top(6 * P).w(8 * P).h(4 * P)
+        .bg("#f4e9ce").text_color("#4a3514").text_size(Math.max(7, Math.min(10, 3 * P))).font_bold().flex().items_center().justify_center().child(String(files.length)))];
   }
 
   ding(P) {

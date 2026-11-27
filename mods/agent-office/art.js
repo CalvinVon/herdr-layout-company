@@ -75,6 +75,11 @@ export const DESK = {
   bulb: [33, -19, 4, 1],
 };
 
+export const ARTIFACT_BOX = {
+  back: [[0, -5, 14, 5, "#836246"], [1, -5, 12, 4, "#b68a55"], [1, -5, 12, 1, "#775c42"]],
+  front: [[0, -4, 14, 1, "#d4ad75"], [1, -3, 12, 3, "#bd935d"], [0, -4, 1, 4, "#8b6946"], [13, -4, 1, 4, "#966f49"]],
+};
+
 export const PIZZA_BOX = [
   [11, -18, 9, 6, "pizzaBox"], [13, -16, 5, 2, "pizzaLogo"], [11, -12, 9, 1, "pizzaBoxShade"],
   [12, -13, 7, 1, "pizza"], [13, -13, 1, 1, "pepperoni"], [16, -13, 1, 1, "pepperoni"], [18, -13, 1, 1, "pizzaCrust"],

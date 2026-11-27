@@ -51,7 +51,6 @@ export default class EdgeDrawer extends View {
     const id = openOverlay({
       kind: "window",
       key: this.overlayKey,
-      frame: "none",
       width,
       height: viewport.height / zoom,
       at: { x: left, y: 0 },
@@ -82,8 +81,9 @@ export default class EdgeDrawer extends View {
   }
 
   render() {
-    this.targetHidden = Boolean(find(layout(), (props() ?? {}).target)?.hidden);
-    return div().id(`edge-drawer-${(props() ?? {}).id ?? "edge"}`).size_full()
+    const p = props() ?? {};
+    this.targetHidden = Boolean(find(layout(), p.target)?.hidden);
+    return div().id(`edge-drawer-${p.id ?? "edge"}`).size_full()
       .on_hover((hovered, cx) => { if (hovered) this.open(cx); });
   }
 }

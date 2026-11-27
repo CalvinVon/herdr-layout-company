@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 function load(file, env) {
   const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
-  const names = [...source.matchAll(/^export (?:const|function|class) (\w+)/gm)].map(match => match[1]);
+  const names = [...source.matchAll(/^export (?:const|(?:async )?function|class) (\w+)/gm)].map(match => match[1]);
   const main = source.match(/export default class (\w+)/)?.[1];
   const body = source.replace(/^import .*;\n/gm, '').replace(/export default class /, 'class ').replace(/^export /gm, '');
   return new Function(...Object.keys(env), body + '\nreturn {' + names.join(',') + (main ? `${names.length ? ',' : ''}default:${main}` : '') + '};')(...Object.values(env));
@@ -21,7 +21,7 @@ let windowActive = true, executions = 0;
 globalThis.window = { is_window_active: () => windowActive };
 const cx = { notify() {}, timer: { every(ms, fn) { timers.set(ms, fn); }, after() {} }, spawn(fn) { pending.push(Promise.resolve().then(() => fn(cx))); } };
 async function flush() { while (pending.length) await Promise.all(pending.splice(0)); }
-const env = { ...model, S, View: class {}, div() {}, svg() {}, A: {}, T: {}, D: {},
+const env = { ...model, ...load('artifacts.js', {}), S, View: class {}, div() {}, svg() {}, A: {}, T: {}, D: {},
   agents: () => [agent, secondAgent], terminals: () => [service, { address: 't1', foreground: { pid: 77 } }, { address: 't3', foreground: { pid: 88 } }], spaces: () => [], panes: () => [], machines: () => [{ name: null, layout: 'ready' }],
   focused: () => focus, shared: key => sharedValues[key], setShared: (key, value) => { sharedValues[key] = value; },
   appHome: () => '/app', readTextFile: async file => files.get(file) ?? null,

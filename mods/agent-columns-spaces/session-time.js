@@ -26,8 +26,3 @@ export function projectActive(space, panes, states, raw, coreState, now) {
     return !members.some(pane => states.get(pane.pane)) && (tab.status === "working" || (recent(tab.changed_at) && (["done", "idle"].includes(tab.status) || members.some(pane => pane.program?.agent || pane.app))));
   });
 }
-
-export function toggleProjects(spaces, folded) {
-  const collapse = spaces.some(space => !folded[space.id]);
-  return { ...folded, ...Object.fromEntries(spaces.map(space => [space.id, collapse])) };
-}

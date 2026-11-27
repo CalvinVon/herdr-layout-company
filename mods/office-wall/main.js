@@ -41,6 +41,7 @@ export default class OfficeWall extends View {
     const target = props() ?? {};
     this.roomKey = target.roomKey;
     this.roomName = target.roomName || "项目";
+    this.fileIds = Array.isArray(target.fileIds) ? new Set(target.fileIds) : null;
     this.serviceFile = target.serviceFile;
     this.services = Array.isArray(target.services) ? target.services : (target.services?.[this.roomKey] ?? []);
     this.pins = [];
@@ -177,7 +178,8 @@ export default class OfficeWall extends View {
     }
     for (const card of services) rows.push({ ...card, observed: true, pinned: pinIds.has(card.id) });
     for (const card of this.pins) if (!services.some(service => service.id === card.id)) rows.push({ ...card, pinned: true, observed: false });
-    const cards = rows.map((card, index) => {
+    const visibleRows = this.fileIds ? rows.filter(card => card.kind === "file" && this.fileIds.has(card.id)) : rows;
+    const cards = visibleRows.map((card, index) => {
       const saved = this.pins.find(item => item.id === card.id);
       const typed = card.kind === "note" || card.kind === "file" || card.kind === "goal";
       const urls = card.observed ? (Array.isArray(card.urls) ? card.urls.filter(url => typeof url === "string") : []) : [card.url].filter(Boolean);
@@ -224,11 +226,11 @@ export default class OfficeWall extends View {
     });
     return v_flex().id("office-wall").track_focus(this.handle).size_full().p(20).gap(12).bg(t.popover).text_color(t.foreground)
       .child(h_flex().gap(10).items_center().child(v_flex().flex_1().gap(3)
-        .child(div().text_size(17).font_semibold().child("服务信息墙"))
-        .child(div().text_size(11).text_color(t.muted).child(`${this.roomName} · ${rows.length} 项`)))
-        .child(button("wall-add", "+ 添加链接", cx => this.edit(null, cx), !locked, true))
-        .child(button("wall-add-note", "+ 添加便签", cx => this.edit(null, cx, "note"), !locked))
-        .child(button("wall-add-file", "+ 添加文件", cx => this.edit(null, cx, "file"), !locked))
+        .child(div().text_size(17).font_semibold().child(this.fileIds ? "工位文档" : "服务信息墙"))
+        .child(div().text_size(11).text_color(t.muted).child(`${this.roomName} · ${visibleRows.length} 项`)))
+        .when(!this.fileIds, el => el.child(button("wall-add", "+ 添加链接", cx => this.edit(null, cx), !locked, true))
+          .child(button("wall-add-note", "+ 添加便签", cx => this.edit(null, cx, "note"), !locked))
+          .child(button("wall-add-file", "+ 添加文件", cx => this.edit(null, cx, "file"), !locked)))
         .child(button("wall-close", "关闭", () => closeOverlay(p.overlay))))
       .when(Boolean(this.editing), el => el.child(v_flex().gap(7).p(10).rounded(8).bg(t.surface)
         .child(div().text_size(12).font_semibold().child(this.editKind === "note" ? "编辑便签" : this.editKind === "file" ? "编辑文件" : "编辑链接"))
@@ -239,6 +241,6 @@ export default class OfficeWall extends View {
         .child(button("wall-reload", "重新读取", cx => this.load(cx), !this.busy))))
       .when(Boolean(this.serviceError), el => el.child(div().text_size(11).text_color(t.blocked).child(this.serviceError)))
       .child(v_flex().id("wall-list").flex_1().min_h(0).overflow_y_scrollbar().gap(10).children(cards)
-        .when(rows.length === 0, el => el.child(div().py(30).text_size(12).text_color(t.dim).child(this.loaded ? "暂无服务或固定链接。" : "正在读取固定链接…"))));
+        .when(visibleRows.length === 0, el => el.child(div().py(30).text_size(12).text_color(t.dim).child(this.loaded ? this.fileIds ? "暂无工位文档。" : "暂无服务或固定链接。" : "正在读取固定链接…"))));
   }
 }

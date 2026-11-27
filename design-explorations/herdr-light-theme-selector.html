@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Herdr 亮色主题 · 四版选择</title>
+<!--
+  Assumptions: compare color only; layout, type, spacing and content stay identical.
+  A is the recommended default. Selection is stored in the URL hash; no app theme is modified.
+  All artwork is a lightweight UI reconstruction based on the supplied Herdr screenshot.
+-->
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f3f4f6;
+    --paper: #ffffff;
+    --ink: #191d24;
+    --copy: #5b6472;
+    --faint: #7a8492;
+    --line: #dde1e7;
+    --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+    --font-mono: "SF Mono", "SFMono-Regular", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 42px 32px 116px; background: var(--page); color: var(--ink); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
+  button, input { font: inherit; }
+  button { cursor: pointer; }
+  button:focus-visible, summary:focus-visible, input:focus-visible + .option-mark { outline: 3px solid #2563eb; outline-offset: 3px; }
+  .page { max-width: 1480px; margin: 0 auto; }
+  .masthead { display: flex; justify-content: space-between; gap: 32px; align-items: end; margin-bottom: 28px; }
+  .eyebrow { color: #697586; font: 600 11px/1.2 var(--font-mono); letter-spacing: .13em; text-transform: uppercase; }
+  h1 { margin: 10px 0 8px; font-size: clamp(25px, 3vw, 36px); line-height: 1.15; letter-spacing: -.035em; font-weight: 680; }
+  .lede { margin: 0; max-width: 690px; color: var(--copy); font-size: 14px; line-height: 1.7; }
+  .study-meta { flex: none; padding-bottom: 3px; text-align: right; color: var(--faint); font: 11px/1.8 var(--font-mono); }
+  .study-meta strong { display: block; color: var(--ink); font-size: 24px; line-height: 1; font-weight: 500; }
+  .themes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+  .theme-card {
+    position: relative; min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 16px;
+    background: var(--paper); box-shadow: 0 8px 28px -24px #1d2738;
+    transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  }
+  .theme-card:hover { transform: translateY(-2px); box-shadow: 0 14px 34px -24px #1d2738; }
+  .theme-card.selected { border-color: var(--choice); box-shadow: 0 0 0 1px var(--choice), 0 16px 38px -26px var(--choice); }
+  .card-head { display: flex; gap: 12px; align-items: flex-start; min-height: 54px; margin-bottom: 15px; }
+  .letter { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--choice-soft); color: var(--choice-ink); font: 650 13px/1 var(--font-mono); }
+  .title-block { min-width: 0; }
+  .title-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  h2 { margin: 0; font-size: 16px; line-height: 1.35; letter-spacing: -.015em; font-weight: 650; }
+  .recommended { padding: 2px 6px; border-radius: 4px; background: var(--choice-soft); color: var(--choice-ink); font-size: 10px; font-weight: 600; }
+  .description { margin: 4px 0 0; color: #697381; font-size: 12px; line-height: 1.5; }
+  .select-control { position: relative; flex: none; margin-left: auto; cursor: pointer; }
+  .select-control input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .option-mark { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border: 1px solid #d9dee5; border-radius: 8px; background: #fff; color: #606b79; font-size: 11px; font-weight: 550; }
+  .option-mark::before { content: ""; width: 7px; height: 7px; border: 1px solid #a3acb8; border-radius: 50%; }
+  .selected .option-mark { border-color: var(--choice); background: var(--choice); color: #fff; }
+  .selected .option-mark::before { border-color: #fff; background: #fff; box-shadow: inset 0 0 0 2px var(--choice); }
+
+  /* Same DOM and geometry in every preview; only custom properties differ. */
+  .app-frame { overflow: hidden; aspect-ratio: 16 / 9.35; border: 1px solid var(--line); border-radius: 11px; background: var(--canvas); color: var(--foreground); font-size: 8px; }
+  .window-bar { height: 7.5%; min-height: 23px; display: flex; align-items: center; gap: 4px; padding: 0 9px; border-bottom: 1px solid var(--line); background: var(--chrome); }
+  .traffic { width: 5px; height: 5px; border-radius: 50%; background: var(--dim); opacity: .48; }
+  .window-title { margin-left: 5px; font-weight: 650; font-size: 8px; }
+  .window-tabs { display: flex; gap: 4px; margin-left: auto; color: var(--dim); }
+  .window-tabs span { padding: 3px 6px; border-radius: 3px; }
+  .window-tabs .active { background: var(--hover); color: var(--foreground); }
+  .workspace { display: grid; grid-template-columns: 25% 51% 24%; height: 92.5%; }
+  .sidebar { min-width: 0; padding: 8px 6px; border-right: 1px solid var(--line); background: var(--chrome); }
+  .side-heading { display: flex; justify-content: space-between; padding: 0 4px 7px; color: var(--foreground); font-size: 8px; font-weight: 650; }
+  .side-heading span { color: var(--dim); font-weight: 400; }
+  .side-tabs { display: flex; gap: 2px; margin: 0 2px 8px; padding: 2px; border-radius: 4px; background: var(--hover); color: var(--dim); font-size: 6px; }
+  .side-tabs span { flex: 1; padding: 3px 0; text-align: center; }
+  .side-tabs .active { border-radius: 3px; background: var(--raised); color: var(--foreground); box-shadow: 0 1px 2px #2430440d; }
+  .space { padding: 5px 4px; color: var(--muted); font-weight: 600; }
+  .space i { display: inline-block; width: 6px; height: 6px; margin-right: 4px; border-radius: 2px; background: var(--accent); opacity: .7; }
+  .tree-row { display: flex; align-items: center; gap: 3px; min-height: 15px; padding: 2px 4px 2px 10px; border-radius: 3px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+  .tree-row.nested { padding-left: 18px; }
+  .tree-row.selected { background: var(--selected); color: var(--foreground); }
+  .tree-row:hover { background: var(--hover); }
+  .status-dot { flex: none; width: 4px; height: 4px; border-radius: 50%; background: var(--idle); }
+  .status-dot.working { background: var(--working); }
+  .status-dot.done { background: var(--done); }
+  .tree-row .time { margin-left: auto; color: var(--dim); font-size: 5.5px; }
+  .agents-label { margin: 9px 4px 5px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--dim); font-size: 7px; font-weight: 600; }
+  .main-stage { min-width: 0; padding: 6px; background: var(--canvas); }
+  .pane { overflow: hidden; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+  .pane:last-child { margin-bottom: 0; }
+  .pane.primary { height: 60%; }
+  .pane.secondary { height: calc(40% - 12px); }
+  .pane-head { display: flex; align-items: center; gap: 4px; height: 22px; padding: 0 7px; border-bottom: 1px solid var(--line); background: var(--raised); }
+  .pane-head.running { background: var(--selected); }
+  .pane-id { color: var(--accent); font: 6px/1 var(--font-mono); }
+  .pane-title { overflow: hidden; color: var(--foreground); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .pane-path { margin-left: auto; color: var(--dim); font-size: 5.5px; }
+  .terminal { height: calc(100% - 22px); padding: 7px 8px; overflow: hidden; color: var(--muted); font: 6.3px/1.65 var(--font-mono); }
+  .terminal .command { color: var(--accent); }
+  .terminal .strong { color: var(--foreground); font-weight: 600; }
+  .terminal .success { color: var(--done); }
+  .terminal .warning { color: var(--blocked); }
+  .code-box { margin: 4px 0; padding: 5px 6px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); color: var(--muted); }
+  .todo { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line); }
+  .progress { height: 2px; margin-top: 6px; overflow: hidden; border-radius: 2px; background: var(--hover); }
+  .progress::after { content: ""; display: block; width: 68%; height: 100%; background: var(--working); }
+  .inspector { min-width: 0; padding: 7px 6px; border-left: 1px solid var(--line); background: var(--surface); }
+  .inspector-title { display: flex; justify-content: space-between; margin: 0 2px 8px; font-size: 8px; font-weight: 650; }
+  .inspector-title span { color: var(--dim); font-size: 6px; font-weight: 400; }
+  .metric-card { margin-bottom: 6px; padding: 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--raised); }
+  .metric-card.focus { border-color: var(--selected); background: var(--selected); }
+  .metric-label { display: flex; justify-content: space-between; color: var(--muted); font-size: 6.5px; }
+  .metric-value { margin: 4px 0; color: var(--foreground); font: 600 13px/1.2 var(--font-mono); letter-spacing: -.04em; }
+  .metric-note { color: var(--dim); font-size: 5.8px; }
+  .bar-chart { display: flex; align-items: end; gap: 3px; height: 30px; margin-top: 7px; padding-top: 4px; border-top: 1px solid var(--line); }
+  .bar-chart i { flex: 1; border-radius: 1px 1px 0 0; background: var(--accent); opacity: .8; }
+  .bar-chart i:nth-child(1) { height: 38%; } .bar-chart i:nth-child(2) { height: 74%; }
+  .bar-chart i:nth-child(3) { height: 100%; } .bar-chart i:nth-child(4) { height: 63%; }
+  .bar-chart i:nth-child(5) { height: 48%; } .bar-chart i:nth-child(6) { height: 29%; }
+
+  .palette-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 13px; }
+  .swatch { min-width: 0; }
+  .swatch-color { height: 24px; border: 1px solid #17203312; border-radius: 5px; }
+  .swatch-name { display: block; margin-top: 4px; overflow: hidden; color: #7a8491; font: 8px/1.2 var(--font-mono); text-overflow: ellipsis; }
+  details { margin-top: 12px; border-top: 1px solid #eceff2; }
+  summary { width: max-content; padding: 10px 0 2px; color: #626d7b; cursor: pointer; font-size: 11px; user-select: none; }
+  .token-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; padding-top: 10px; }
+  .token { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 6px; align-items: center; min-width: 0; }
+  .token i { width: 12px; height: 12px; border: 1px solid #17203312; border-radius: 3px; }
+  .token span { overflow: hidden; color: #7a8491; font: 8px/1.3 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+  .token b { display: block; color: #46515f; font-weight: 500; }
+
+  .selection-bar { position: fixed; z-index: 10; right: 24px; bottom: 20px; left: 24px; display: flex; align-items: center; gap: 16px; max-width: 760px; margin: auto; padding: 12px 12px 12px 18px; border: 1px solid #d8dde4; border-radius: 14px; background: #fffffff2; box-shadow: 0 14px 44px -16px #1b263b4d; backdrop-filter: blur(16px); }
+  .selection-copy { min-width: 0; flex: 1; }
+  .selection-kicker { display: block; margin-bottom: 2px; color: #7b8592; font-size: 10px; }
+  .selection-name { display: block; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .selection-hint { color: #7a8491; font-size: 10px; }
+  .copy-button { min-width: 132px; min-height: 40px; padding: 0 16px; border: 0; border-radius: 9px; background: #202630; color: #fff; font-size: 12px; font-weight: 600; }
+  .copy-button:hover { background: #354052; }
+  .copy-button.copied { background: #176b52; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  @media (max-width: 980px) {
+    body { padding: 30px 20px 112px; }
+    .themes { grid-template-columns: 1fr; }
+    .app-frame { font-size: 9px; }
+  }
+  @media (max-width: 560px) {
+    body { padding: 24px 12px 122px; }
+    .masthead { align-items: start; }
+    .study-meta { display: none; }
+    .theme-card { padding: 12px; border-radius: 13px; }
+    .card-head { gap: 9px; }
+    .description { max-width: 240px; }
+    .app-frame { aspect-ratio: 1.35; }
+    .window-tabs, .pane-path, .tree-row .time { display: none; }
+    .workspace { grid-template-columns: 28% 72%; }
+    .inspector { display: none; }
+    .palette-strip { gap: 4px; }
+    .token-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .selection-bar { right: 12px; bottom: 12px; left: 12px; gap: 10px; padding-left: 13px; }
+    .selection-hint { display: none; }
+    .copy-button { min-width: 112px; padding: 0 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .theme-card { transition: none; } .theme-card:hover { transform: none; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="masthead">
+    <div>
+      <div class="eyebrow">Herdr / Light theme study</div>
+      <h1>选一种更干净的 Herdr。</h1>
+      <p class="lede">四版使用完全相同的布局、字号与内容，只比较颜色。点击「选择」后，可复制对应的完整主题 JSON；此页面不会修改当前 Herdr 配置。</p>
+    </div>
+    <div class="study-meta"><strong>04</strong>COLOR DIRECTIONS<br>LIGHT MODE ONLY</div>
+  </header>
+  <section class="themes" id="themes" aria-label="亮色主题方案"></section>
+</main>
+<div class="selection-bar">
+  <div class="selection-copy">
+    <span class="selection-kicker">当前选择</span>
+    <span class="selection-name" id="selection-name"></span>
+  </div>
+  <span class="selection-hint">选择已写入网址，可直接分享</span>
+  <button class="copy-button" id="copy-button" type="button">复制主题 JSON</button>
+</div>
+<div class="sr-only" id="announcer" aria-live="polite"></div>
+<script>
+const themes = [
+  {
+    id: 'a', letter: 'A', name: '瓷白钴蓝', english: 'Porcelain Cobalt', recommended: true,
+    description: '高亮白与清晰钴蓝。最稳妥，工具感直接，选中与运行状态最明确。',
+    json: {
+      background: '#ffffff', foreground: '#182238', selection: '#dceaff', cursor: '#155eef',
+      ansi: ['#182238','#b83a44','#13795b','#8a5a00','#155eef','#8250a5','#00736f','#4e5d75','#68758a','#c4464f','#178767','#9a6500','#2d6fed','#8c5aaf','#008783','#93a0b3'],
+      colors: { canvas:'#f2f6fb',chrome:'#f7f9fc',surface:'#ffffff',raised:'#ffffff',popover:'#ffffff',input:'#ffffff',hover:'#eaf0f8',selected:'#dceaff',border:'#d8e2ef',muted:'#4e5d75',dim:'#68758a',accent:'#155eef',accent_foreground:'#ffffff',solid:'#155eef',solid_foreground:'#ffffff',working:'#155eef',blocked:'#965a00',done:'#13795b',idle:'#68758a',unknown:'#68758a' }
+    }
+  },
+  {
+    id: 'b', letter: 'B', name: '暖玉青绿', english: 'Alabaster Teal',
+    description: '极浅暖白与深青绿。柔和耐看，摆脱冷灰，同时保持克制的编辑器气质。',
+    json: {
+      background: '#fffefc', foreground: '#202724', selection: '#dceee9', cursor: '#0f766e',
+      ansi: ['#202724','#b3483f','#23744b','#89600a','#2867b2','#80549a','#0f766e','#4f5e58','#6c7872','#bd5047','#2b8155','#996b0c','#3674bd','#8b60a5','#14857b','#98a19c'],
+      colors: { canvas:'#f5f3ee',chrome:'#faf9f6',surface:'#fffefc',raised:'#ffffff',popover:'#ffffff',input:'#ffffff',hover:'#efede7',selected:'#dceee9',border:'#e2ded5',muted:'#4f5e58',dim:'#6c7872',accent:'#0f766e',accent_foreground:'#ffffff',solid:'#0f766e',solid_foreground:'#ffffff',working:'#0f766e',blocked:'#92500a',done:'#23744b',idle:'#737a75',unknown:'#737a75' }
+    }
+  },
+  {
+    id: 'c', letter: 'C', name: '冰川浅青', english: 'Glacier Aqua',
+    description: '淡青底层与纯白内容面。最轻盈、最有空气感，适合高密度终端与路由信息。',
+    json: {
+      background: '#ffffff', foreground: '#152827', selection: '#d5ebe9', cursor: '#00736f',
+      ansi: ['#152827','#b44448','#227252','#87600b','#2566ae','#79509a','#00736f','#486360','#627976','#bf5054','#2a8060','#956b0d','#3272ba','#875ca7','#00827d','#8da19e'],
+      colors: { canvas:'#eef6f6',chrome:'#f5fafa',surface:'#ffffff',raised:'#ffffff',popover:'#ffffff',input:'#ffffff',hover:'#e3f0f0',selected:'#d5ebe9',border:'#d2e3e3',muted:'#486360',dim:'#627976',accent:'#00736f',accent_foreground:'#ffffff',solid:'#00736f',solid_foreground:'#ffffff',working:'#00736f',blocked:'#925d06',done:'#227252',idle:'#6c7f7c',unknown:'#6c7f7c' }
+    }
+  },
+  {
+    id: 'd', letter: 'D', name: '纸白朱砂', english: 'Paper Vermilion',
+    description: '暖纸白与低明度朱砂。辨识度最强，偏精品编辑工具；错误色需保持更深。',
+    json: {
+      background: '#ffffff', foreground: '#292421', selection: '#f8e4de', cursor: '#b94a32',
+      ansi: ['#292421','#a53b36','#327054','#8b5c09','#2c64b7','#875297','#15746e','#615650','#7a6d65','#b94a32','#3b7c5f','#9b680c','#3971c3','#935fa3','#1c827a','#a0948b'],
+      colors: { canvas:'#f7f4f0',chrome:'#fbf9f6',surface:'#ffffff',raised:'#ffffff',popover:'#ffffff',input:'#ffffff',hover:'#f0eae4',selected:'#f8e4de',border:'#e5ddd5',muted:'#615650',dim:'#7a6d65',accent:'#b94a32',accent_foreground:'#ffffff',solid:'#b94a32',solid_foreground:'#ffffff',working:'#b94a32',blocked:'#925d06',done:'#327054',idle:'#7d736c',unknown:'#7d736c' }
+    }
+  }
+];
+
+const preview = `
+  <div class="app-frame" aria-hidden="true">
+    <div class="window-bar"><i class="traffic"></i><i class="traffic"></i><i class="traffic"></i><span class="window-title">Herdr</span><div class="window-tabs"><span class="active">工作区</span><span>Files</span><span>Changes</span><span>Editor</span></div></div>
+    <div class="workspace">
+      <aside class="sidebar">
+        <div class="side-heading">Spaces <span>＋</span></div>
+        <div class="side-tabs"><span class="active">按目录</span><span>按分支</span><span>原始列表</span></div>
+        <div class="space"><i></i>需求研发部</div>
+        <div class="tree-row"><b>⌄</b> epower-thanos-app <span class="time">2 目录</span></div>
+        <div class="tree-row nested"><i class="status-dot working"></i> t19p · 研发工程师 <span class="time">12:15</span></div>
+        <div class="tree-row nested selected"><i class="status-dot working"></i> t18s · 技术 leader <span class="time">当前</span></div>
+        <div class="space"><i></i>Herdr 定制研发部</div>
+        <div class="tree-row"><b>⌄</b> herdr-layout-backup</div>
+        <div class="tree-row nested"><i class="status-dot done"></i> t1d6 · 设计 Spaces</div>
+        <div class="tree-row nested"><i class="status-dot"></i> t1dq · 修复固定面板</div>
+        <div class="agents-label">AGENTS <span style="float:right;font-weight:400">7 working</span></div>
+        <div class="tree-row"><i class="status-dot working"></i> 项目经理 / 技术 leader</div>
+        <div class="tree-row"><i class="status-dot done"></i> 测试工程师</div>
+      </aside>
+      <section class="main-stage">
+        <article class="pane primary">
+          <div class="pane-head running"><i class="status-dot working"></i><span class="pane-id">t19p</span><span class="pane-title">研发工程师 · 接入旧导航共享规则</span><span class="pane-path">~/Documents/epower</span></div>
+          <div class="terminal"><span class="command">❯ verify migration routing</span>
+<span class="strong">ROUTE 目标配置裁定</span>：已核验新仓入口
+<div class="code-box">drnVerified: <span class="success">true</span>
+parentPage: <span class="warning">需要复核</span>
+migrationParentPage: <span class="strong">保留容器</span></div>
+<div class="todo"><span class="strong">TODO</span> · Tasks 3 / 5<br>✓ 核对修订矩阵与导航语义<br>✓ 实现新仓页标记与结果容器<br>□ 运行定向测试与两仓构建</div>
+<div class="progress"></div></div>
+        </article>
+        <article class="pane secondary">
+          <div class="pane-head"><i class="status-dot done"></i><span class="pane-id">t1dk</span><span class="pane-title">构建验证</span><span class="pane-path">/private/tmp/build</span></div>
+          <div class="terminal"><span class="command">❯ pnpm build</span><br> transforming migration modules…<br><span class="warning">BABEL Note: code generator deoptimised styling</span><br><span class="success">✓ Build completed in 85.011s</span><br><span class="strong">BUNDLE</span> .drn/entry/entry.ios.js</div>
+        </article>
+      </section>
+      <aside class="inspector">
+        <div class="inspector-title">Magpie <span>总览　用量</span></div>
+        <div class="metric-card focus"><div class="metric-label"><span>实时路由</span><span>1 个处理中</span></div><div class="metric-value">GPT-6 Astra</div><div class="metric-note">remote-magpie / codex · 63 秒</div><div class="progress"></div></div>
+        <div class="metric-card"><div class="metric-label"><span>来源额度</span><span>重置</span></div><div class="metric-label" style="margin-top:8px"><span>Kimi Code</span><b>95%</b></div><div class="progress"></div><div class="metric-label" style="margin-top:8px"><span>Codex</span><b>95%</b></div><div class="progress"></div></div>
+        <div class="metric-card"><div class="metric-label"><span>用量概览</span><span>今天</span></div><div class="metric-value">117.2M</div><div class="metric-note">Token · 594 requests</div><div class="bar-chart"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+      </aside>
+    </div>
+  </div>`;
+
+const container = document.querySelector('#themes');
+const selectionName = document.querySelector('#selection-name');
+const copyButton = document.querySelector('#copy-button');
+const announcer = document.querySelector('#announcer');
+let selectedId = 'a';
+
+function colorMix(hex, opacity) {
+  const value = hex.replace('#', '');
+  return `rgba(${parseInt(value.slice(0,2),16)}, ${parseInt(value.slice(2,4),16)}, ${parseInt(value.slice(4,6),16)}, ${opacity})`;
+}
+
+function cardTemplate(theme) {
+  const colors = theme.json.colors;
+  const palette = ['canvas','surface','accent','selected','border'];
+  const tokens = [['background', theme.json.background], ['foreground', theme.json.foreground], ...Object.entries(colors)];
+  return `<article class="theme-card" data-theme="${theme.id}" style="--choice:${colors.accent};--choice-soft:${colors.selected};--choice-ink:${colors.accent};${Object.entries(colors).map(([key,value]) => `--${key}:${value}`).join(';')};--foreground:${theme.json.foreground}">
+    <div class="card-head">
+      <span class="letter">${theme.letter}</span>
+      <div class="title-block"><div class="title-line"><h2>${theme.name}</h2>${theme.recommended ? '<span class="recommended">推荐</span>' : ''}</div><p class="description">${theme.description}</p></div>
+      <label class="select-control"><input type="radio" name="theme" value="${theme.id}" aria-label="选择 ${theme.letter} ${theme.name}"><span class="option-mark">选择</span></label>
+    </div>
+    ${preview}
+    <div class="palette-strip">${palette.map(key => `<div class="swatch"><div class="swatch-color" style="background:${colors[key]}"></div><span class="swatch-name">${key}</span></div>`).join('')}</div>
+    <details><summary>查看完整色板</summary><div class="token-grid">${tokens.map(([key,value]) => `<div class="token"><i style="background:${value}"></i><span>${key}<b>${value}</b></span></div>`).join('')}</div></details>
+  </article>`;
+}
+
+function currentTheme() { return themes.find(theme => theme.id === selectedId); }
+function selectTheme(id, updateUrl = true) {
+  if (!themes.some(theme => theme.id === id)) id = 'a';
+  selectedId = id;
+  document.querySelectorAll('.theme-card').forEach(card => {
+    const selected = card.dataset.theme === id;
+    card.classList.toggle('selected', selected);
+    const input = card.querySelector('input');
+    input.checked = selected;
+    card.querySelector('.option-mark').textContent = selected ? '已选择' : '选择';
+  });
+  const theme = currentTheme();
+  selectionName.textContent = `${theme.letter} · ${theme.name} / ${theme.english}`;
+  if (updateUrl) history.replaceState(null, '', `#${id}`);
+}
+
+container.innerHTML = themes.map(cardTemplate).join('');
+container.addEventListener('change', event => {
+  if (event.target.matches('input[name="theme"]')) {
+    selectTheme(event.target.value);
+    announcer.textContent = `已选择 ${currentTheme().letter} ${currentTheme().name}`;
+  }
+});
+window.addEventListener('hashchange', () => selectTheme(location.hash.slice(1), false));
+selectTheme(location.hash.slice(1) || 'a', false);
+
+copyButton.addEventListener('click', async () => {
+  const text = JSON.stringify(currentTheme().json, null, 2);
+  try {
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
+    else {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('copy unavailable');
+    }
+    copyButton.textContent = '已复制 JSON';
+    copyButton.classList.add('copied');
+    announcer.textContent = `${currentTheme().name}主题 JSON 已复制`;
+    setTimeout(() => { copyButton.textContent = '复制主题 JSON'; copyButton.classList.remove('copied'); }, 1800);
+  } catch {
+    copyButton.textContent = '复制失败，请展开色板';
+    announcer.textContent = '浏览器未允许复制，请展开所选方案的完整色板';
+  }
+});
+</script>
+</body>
+</html>

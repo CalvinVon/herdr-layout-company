@@ -507,13 +507,14 @@ export default class MagpieLive extends View {
     const names = [...byProvider.keys()];
     const order = [...this.providerOrder.filter((name) => names.includes(name)), ...names.filter((name) => !this.providerOrder.includes(name))];
     if (!order.length) return text("暂无额度数据", t.dim, 10);
-    const groups = order.map((provider, i) => {
-      if (this.hiddenProviders.includes(provider) && !this.editQuotas) return null;
-      const entries = byProvider.get(provider).filter(({ key }) => this.editQuotas || !this.hiddenQuotas.includes(key));
-      if (!entries.length) return null;
+    const columns = (this.quotaWidth ?? this.width - 36) >= 200 ? 2 : 1;
+    const providers = order.map((provider, i) => ({ provider, i, entries: byProvider.get(provider).filter(({ key }) => this.editQuotas || !this.hiddenQuotas.includes(key)) }))
+      .filter(({ provider, entries }) => entries.length && (this.editQuotas || !this.hiddenProviders.includes(provider)));
+    const groups = providers.map(({ provider, i, entries }, visibleIndex) => {
       const move = (direction, cx) => {
         const next = [...order];
-        [next[i], next[i + direction]] = [next[i + direction], next[i]];
+        const target = order.indexOf(providers[visibleIndex + direction].provider);
+        [next[i], next[target]] = [next[target], next[i]];
         this.providerOrder = next;
         preferences.setItem("magpie-live.provider-order", JSON.stringify(next));
         cx.notify();
@@ -522,12 +523,20 @@ export default class MagpieLive extends View {
       const icon = file ? (["grok", "kimi", "opencode-zen-free"].includes(provider)
         ? svg(`mods/magpie-live/${file}`).size(14).text_color(t.muted)
         : image(`mods/magpie-live/${file}`).size(14)) : svg("icons/program.svg").size(14).text_color(t.muted);
-      return v_flex().w_full().min_w(0).gap(4).p(8).rounded(8).bg(t.raised)
-        .child(h_flex().gap(5).items_center().child(icon)
-          .child(div().flex_1().min_w(0).truncate().text_size(10).text_color(t.foreground).child(entries[0].quota.name || provider))
-          .when(this.editQuotas, row => row.child(div().id(`provider-visibility-${i}`).cursor_pointer().text_size(9).text_color(t.accent).on_click((_e, cx) => { this.hiddenProviders = this.hiddenProviders.includes(provider) ? this.hiddenProviders.filter((name) => name !== provider) : [...this.hiddenProviders, provider]; preferences.setItem("magpie-live.hidden-providers", JSON.stringify(this.hiddenProviders)); cx.notify(); }).child(this.hiddenProviders.includes(provider) ? "显示" : "隐藏")))
-          .when(i > 0, row => row.child(div().id(`quota-up-${i}`).cursor_pointer().text_color(t.dim).opacity(0.6).tooltip("前移").on_click((_e, cx) => move(-1, cx)).child("‹")))
-          .when(i < order.length - 1, row => row.child(div().id(`quota-down-${i}`).cursor_pointer().text_color(t.dim).opacity(0.6).tooltip("后移").on_click((_e, cx) => move(1, cx)).child("›"))))
+      const showRemove = this.editQuotas || this.hoveredQuotaIcon === provider;
+      return v_flex().id(`provider-quota-${i}`).w_full().min_w(0).gap(4).p(8).rounded(8).bg(t.raised)
+        .child(h_flex().gap(5).items_center()
+          .child(div().id(`provider-icon-${i}`).size(18).flex_none().flex().items_center().justify_center()
+            .on_hover((hovered, cx) => { const next = hovered ? provider : this.hoveredQuotaIcon === provider ? null : this.hoveredQuotaIcon; if (next !== this.hoveredQuotaIcon) { this.hoveredQuotaIcon = next; cx.notify(); } })
+            .when(!showRemove, el => el.child(icon))
+            .when(showRemove, el => el.child(div().id(`provider-visibility-${i}`).size(18).flex().items_center().justify_center().rounded(3).cursor_pointer().text_size(12).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip(this.hiddenProviders.includes(provider) ? "恢复此来源卡片" : "移除此来源卡片").role("button").accessibility_label(`${this.hiddenProviders.includes(provider) ? "恢复" : "移除"}${entries[0].quota.name || provider}额度卡片`)
+              .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+              .on_click((_event, cx) => { cx.stop_propagation(); this.hoveredQuotaIcon = null; this.hiddenProviders = this.hiddenProviders.includes(provider) ? this.hiddenProviders.filter((name) => name !== provider) : [...this.hiddenProviders, provider]; preferences.setItem("magpie-live.hidden-providers", JSON.stringify(this.hiddenProviders)); cx.notify(); }).child(this.hiddenProviders.includes(provider) ? "+" : "×"))))
+          .child(div().flex_1().min_w(0).truncate().tooltip(entries[0].quota.name || provider).text_size(11).text_color(t.foreground).child(entries[0].quota.name || provider))
+          .when(visibleIndex > 0, row => row.child(div().id(`quota-up-${i}`).size(18).flex_none().flex().items_center().justify_center().rounded(3).cursor_pointer().text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip("前移").role("button").accessibility_label("前移额度卡片")
+            .on_mouse_down("left", (_event, cx) => cx.stop_propagation()).on_click((_event, cx) => { cx.stop_propagation(); move(-1, cx); }).child("‹")))
+          .when(visibleIndex < providers.length - 1, row => row.child(div().id(`quota-down-${i}`).size(18).flex_none().flex().items_center().justify_center().rounded(3).cursor_pointer().text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip("后移").role("button").accessibility_label("后移额度卡片")
+            .on_mouse_down("left", (_event, cx) => cx.stop_propagation()).on_click((_event, cx) => { cx.stop_propagation(); move(1, cx); }).child("›"))))
         .children(entries.map((entry, index) => {
           const { quota, window, key, remaining } = entry;
           const hidden = this.hiddenQuotas.includes(key);
@@ -545,8 +554,8 @@ export default class MagpieLive extends View {
             .when(!this.editQuotas && Boolean(window) && remaining !== null, row => row.child(div().w_full().h(3).rounded(2).overflow_hidden().bg(t.border)
               .child(div().w(`${remaining}%`).h_full().rounded(2).bg(remaining < 10 ? t.blocked : t.accent))));
         }));
-    }).filter(Boolean);
-    return groups.length ? h_flex().w_full().gap(6).items_start().children([0, 1].map((column) => v_flex().flex_1().min_w(0).gap(6).children(groups.filter((_group, index) => index % 2 === column)))) : text("额度已全部隐藏，点击管理恢复", t.dim, 10);
+    });
+    return groups.length ? h_flex().id("provider-quota-columns").w_full().gap(6).items_start().children(Array.from({ length: columns }, (_value, column) => v_flex().flex_1().min_w(0).gap(6).children(groups.filter((_group, index) => index % columns === column)))) : text("额度已全部移除，点击重置恢复", t.dim, 10);
   }
 
   metric(t, label, value, detail, comparison) {
@@ -745,7 +754,7 @@ export default class MagpieLive extends View {
       const currentRoutes = active.filter(current);
       const activeRows = () => {
         const groups = new Map();
-        for (const request of [...currentRoutes, ...active.filter((item) => !current(item))]) {
+        for (const request of currentSession ? currentRoutes : [...currentRoutes, ...active.filter((item) => !current(item))]) {
           const key = request.session || request;
           if (!groups.has(key)) groups.set(key, []);
           groups.get(key).push(request);
@@ -803,11 +812,15 @@ export default class MagpieLive extends View {
       });
       const sections = [
         { id: "graph", name: "全部活动路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => div().flex().justify_center().child(graph()) },
-        { id: "quotas", name: "来源额度", extra: () => div().id("quota-manage").cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.editQuotas = !this.editQuotas; next.notify(); }).child(this.editQuotas ? "完成" : "隐藏 / 显示"),
-          view: () => div().id("provider-quota-list").w_full().child(this.providerQuotas(t)) },
+        { id: "quotas", name: "来源额度", extra: () => h_flex().gap(5).items_center()
+          .child(div().id("quota-reset").cursor_pointer().text_size(10).text_color(t.accent).tooltip("一键重置：恢复全部来源卡片和额度项").role("button").accessibility_label("重置来源额度显示")
+            .on_mouse_down("left", (_event, next) => next.stop_propagation())
+            .on_click((_event, next) => { next.stop_propagation(); this.hiddenProviders = []; this.hiddenQuotas = []; preferences.setItem("magpie-live.hidden-providers", "[]"); preferences.setItem("magpie-live.hidden-quotas", "[]"); next.notify(); }).child("重置"))
+          .child(div().id("quota-manage").cursor_pointer().text_size(10).text_color(t.accent).on_click((_e, next) => { this.editQuotas = !this.editQuotas; next.notify(); }).child(this.editQuotas ? "完成" : "隐藏 / 显示")),
+          view: () => div().id("provider-quota-list").w_full().on_size_change((size, next) => { if (this.quotaWidth !== size.width) { this.quotaWidth = size.width; next.notify(); } }).child(this.providerQuotas(t)) },
         { id: "usage", name: "用量概览", extra: () => text(PERIODS.find(([id]) => id === this.period)?.[1] || "本期", t.dim, 10), view: () => this.usageOverview(t) },
         { id: "usage-trend", name: "用量走势", extra: () => text(this.chartGranularity === "hour" ? "按小时" : "按天", t.dim, 10), view: () => this.usageChart(t) },
-        { id: "decisions", name: "实时路由", extra: () => text(`${active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(6)
+        { id: "decisions", name: "实时路由", extra: () => text(`${currentSession ? currentRoutes.length : active.length} 个处理中`, t.dim, 10), view: () => v_flex().gap(6)
           .when(!currentRoutes.length && (currentSession || !active.length), body => body.child(v_flex().gap(5).p(10).rounded(8).bg(currentSession ? t.selected : light ? t.raised : t.surface)
             .when(Boolean(currentSession), card => card.border(1).border_color(t.border))
             .child(h_flex().items_center().gap(6)

@@ -8,9 +8,11 @@ const timers = [];
 const sharedStorage = new Map();
 const handlers = {};
 let pointerReads = 0;
+const edgePaint = [];
 const element = new Proxy({}, {
   get: (_target, name) => (...args) => {
     if (name.startsWith("on_")) handlers[name] = args[0];
+    if (name === "child" || name === "tooltip" || name === "hover") edgePaint.push(name);
     return element;
   },
 });
@@ -28,6 +30,7 @@ const dependencies = {
     props: () => options,
     layout: () => tree,
     settings: () => ({ zoom }),
+    theme: () => ({ accent: "#007aff", dim: "#737980" }),
     shared: key => key === "layout" ? "agent-columns" : sharedStorage.get(key),
     setShared: (key, value) => sharedStorage.set(key, value),
     run: (name, args) => commands.push({ name, args }),
@@ -78,12 +81,13 @@ const reset = (target = "sidebar") => {
 let drawer = reset();
 const before = JSON.stringify(tree);
 drawer.render();
+assert.deepEqual(edgePaint, [], "A collapsed sidebar must not paint a permanent edge rail or handle");
 handlers.on_hover(true, cx);
 assert.equal(commands.length, 0, "Hovering must not show or resize docked layout nodes");
 assert.equal(opened.length, 1, "Hovering should open an overlay");
 assert.equal(JSON.stringify(tree), before, "The central layout and hidden sidebar must stay unchanged");
 assert.equal(opened[0].kind, "window");
-assert.equal(opened[0].frame, "none");
+assert.equal(opened[0].frame, undefined, "The drawer should use the native rounded frame and soft shadow");
 assert.equal(opened[0].width, 440);
 assert.equal(opened[0].at.x, 0);
 assert.equal(opened[0].layout.hidden, false);
@@ -104,6 +108,9 @@ assert.deepEqual(closed, ["overlay-1"]);
 await Promise.all(tasks);
 
 drawer = reset("magpie-panel");
+edgePaint.length = 0;
+drawer.render();
+assert.deepEqual(edgePaint, [], "The left sidebar affordance must not appear on the right Magpie edge");
 drawer.open(cx);
 assert.equal(opened[0].at.x, 880);
 assert.equal(opened[0].width, 320);
@@ -114,7 +121,9 @@ await Promise.all(tasks);
 
 drawer = reset();
 tree.children[0].hidden = false;
+edgePaint.length = 0;
 drawer.render();
+assert.deepEqual(edgePaint, [], "The handle and expansion hint disappear while the sidebar is docked");
 const readsWhileVisible = pointerReads;
 timers[0](cx);
 assert.equal(pointerReads, readsWhileVisible, 'visible docked panels must skip edge pointer polling');

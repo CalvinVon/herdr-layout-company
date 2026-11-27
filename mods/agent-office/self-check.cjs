@@ -14,6 +14,7 @@ function element() {
       if (key === 'child') target.nodes.push(args[0]);
       else if (key === 'children') target.nodes.push(...args[0]);
       else if (key === 'when') { if (args[0]) args[1](view); }
+      else if (key === 'on_mouse_down') target.props.on_mouse_down = args[1];
       else target.props[key === 'loop' ? `loop:${args[0]}` : String(key)] = key === 'loop' ? args[1] : args[0];
       return view;
     };
@@ -24,7 +25,7 @@ function element() {
 /** @param {string} filename @param {Record<string, any>} env @returns {any} */
 function load(filename, env) {
   const source = fs.readFileSync(path.join(__dirname, filename), 'utf8');
-  const names = [...source.matchAll(/^export (?:const|let|function|class) (\w+)/gm)].map(match => match[1]);
+  const names = [...source.matchAll(/^export (?:const|let|(?:async )?function|class) (\w+)/gm)].map(match => match[1]);
   const main = source.match(/export default class (\w+)/)?.[1];
   const body = source.replace(/^import .*;\n/gm, '').replace(/export default class /, 'class ').replace(/^export /gm, '');
   return new Function(...Object.keys(env), body + '\nreturn {' + names.map(name => `get ${name}(){return ${name};}`).join(',') + (main ? `${names.length ? ',' : ''}default:${main}` : '') + '};')(...Object.values(env));
@@ -34,6 +35,7 @@ const D = load('decor.js', { div: element, A, run() {}, panes: () => [] });
 const T = load('themes.js', { div: element, A, D });
 const model = load('projects.js', {});
 const S = load('wall-services.js', {});
+const artifacts = load('artifacts.js', {});
 /** @type {any[]} */
 const agents = [
   { address: 'a', pane: 'pane-a', status: 'idle', focused: true, space_name: 'repo', tab: 'shared-tab' },
@@ -61,7 +63,7 @@ const paneCalls = [];
 let livePanes = [];
 let zoom = 1;
 globalThis.window = { paint_path: () => element(), is_window_active: () => true };
-const env = { ...model, View: class {}, div: element, svg: element, Scrollbar: { vertical: element }, VirtualListScrollHandle: { new: () => ({ scroll_to_item() {} }) }, v_virtual_list: (id, count, sizes, key, render) => element().id(id).children(render({ start: 0, end: count })), PathBuilder: { fill: () => ({ add_polygon() {}, build: () => ({}) }) }, A, T, D, S, agents: () => agents, terminals: noRows, spaces: noRows, panes: () => livePanes, machines: noRows,
+const env = { ...model, ...artifacts, View: class {}, div: element, svg: element, Scrollbar: { vertical: element }, VirtualListScrollHandle: { new: () => ({ scroll_to_item() {} }) }, v_virtual_list: (id, count, sizes, key, render) => element().id(id).children(render({ start: 0, end: count })), PathBuilder: { fill: () => ({ add_polygon() {}, build: () => ({}) }) }, A, T, D, S, agents: () => agents, terminals: noRows, spaces: noRows, panes: () => livePanes, machines: noRows,
   focused: () => focus, shared: (/** @type {string} */ key) => key === 'workspace.office-groups' ? groups : sharedValues[key],
   setShared(/** @type {string} */ key, /** @type {any} */ value) { sharedValues[key] = value; }, run(command, args) { paneCalls.push({ command, args }); }, openOverlay() {}, exec(command, args) { openedFiles.push({ command, args }); return Promise.resolve({ code: 0 }); }, window: () => ({ platform: 'macos' }), settings: () => ({ zoom }), hc() {}, writeTextFile() {} };
 const Office = load('main.js', env).default;
@@ -302,6 +304,69 @@ async function weatherChecks() {
  } finally { global.fetch = oldFetch; }
 }
 const weatherVerification = weatherChecks();
+const documentProject = { id: 'documents', projectKey: 'docs', name: 'Documents', machine: null };
+const documentAgent = { address: 'author', tab: 'documents', status: 'idle' };
+const documentFiles = [
+  { id: 'md', kind: 'file', name: '技术方案', path: '/tmp/技术方案.MD' },
+  { id: 'html', kind: 'file', name: '交互原型', path: '/tmp/prototype.html' },
+  { id: 'pdf', kind: 'file', name: '评审材料', path: '/tmp/review.pdf' },
+];
+office.currentProject = documentProject;
+office.artifactFiles = new Map([['author', documentFiles]]);
+office.tabOrder = ['documents'];
+office.at.author = { spot: 'desk' };
+const documentGeometry = T.officeGeometry(1200, 250, 3, documentProject);
+const documentDesk = office.deskAt(0, documentGeometry.deskPos(0), documentGeometry, documentAgent, {}, 'feature/old-branch');
+assert.ok(!text(documentDesk).includes('feature/old-branch'), 'workstation documents must replace the branch sticky');
+const box = find(documentDesk, 'artifact-bag-author');
+assert.equal(box.props.left, 10 * documentGeometry.P);
+assert.ok(box.props.left + box.props.w <= 20 * documentGeometry.P + 6 * Math.max(2, Math.round(documentGeometry.P * 0.7)), 'the box must stay left of the first intern stool');
+assert.equal(box.props.top + box.props.h, A.BOX * documentGeometry.P, 'the box must rest on the floor under the desk');
+assert.equal(text(find(box, 'artifact-count-author')), '3');
+const typeColors = new Set();
+for (const file of documentFiles) {
+  const paper = find(box, `artifact-paper-author-${file.id}`);
+  assert.equal(paper.props.bg, '#fffef5');
+  typeColors.add(find(paper, `artifact-type-author-${file.id}`).props.bg);
+  assert.ok(box.props.tooltip.includes(file.name) && box.props.tooltip.includes(file.path));
+  assert.equal(find(documentDesk, `desk-document-author-${file.id}`), undefined, 'desktop file labels must be removed');
+}
+assert.equal(typeColors.size, 3, 'Markdown, HTML and PDF must have distinct preset colors');
+let selectedFiles, boxStopped = false;
+const openBag = office.openArtifactBag;
+office.openArtifactBag = files => { selectedFiles = files; };
+box.props.on_mouse_down({}, { stop_propagation() { boxStopped = true; } });
+assert.ok(boxStopped, 'pressing the box must not drag the window');
+boxStopped = false;
+box.props.on_click({}, { stop_propagation() { boxStopped = true; } });
+assert.ok(boxStopped, 'opening the box must not activate the desk');
+assert.equal(selectedFiles, documentFiles);
+office.openArtifactBag = openBag;
+for (const count of [1, 3, 5, 12, 1000]) {
+  const files = Array.from({ length: count }, (_, index) => ({ ...documentFiles[index % 3], id: `file-${index}` }));
+  office.artifactFiles.set('author', files);
+  for (const spot of ['desk', 'cooler', 'couch']) {
+    office.at.author = { spot };
+    const desk = office.deskAt(0, documentGeometry.deskPos(0), documentGeometry, documentAgent, {});
+    const bag = find(desk, 'artifact-bag-author');
+    assert.equal(text(find(bag, 'artifact-count-author')), String(count), 'every nonempty box must show the full count');
+    assert.equal(bag.nodes.filter(node => node.props?.id?.startsWith('artifact-paper-')).length, Math.min(count, 5));
+    assert.ok(find(bag, `artifact-paper-author-file-${Math.min(count, 5) - 1}`).props.top >= 0);
+  }
+}
+office.openArtifactBag([documentFiles[0]], { spawn(fn) { fn({ notify() {} }); } });
+assert.deepEqual(openedFiles.at(-1), { command: 'open', args: [documentFiles[0].path] });
+let listRequest;
+env.openOverlay = request => { listRequest = request; };
+const BagOffice = load('main.js', env).default;
+const multiBag = new BagOffice(); multiBag.currentProject = documentProject;
+multiBag.openArtifactBag(documentFiles, cx);
+assert.deepEqual(listRequest.props.fileIds, documentFiles.map(file => file.id));
+assert.equal(listRequest.props.space, documentProject.id);
+office.artifactFiles.clear();
+const emptyDocumentDesk = office.deskAt(0, documentGeometry.deskPos(0), documentGeometry, documentAgent, {});
+assert.equal(find(emptyDocumentDesk, 'artifact-bag-author'), undefined, 'a workstation without files must not display a box');
+assert.equal(find(emptyDocumentDesk, 'artifact-count-author'), undefined);
 const B = load('../office-building/main.js', { ...env, h_flex: element, theme: () => ({ chrome: '#20232a', foreground: '#eee', muted: '#999' }), props: () => ({}), closeOverlay() { assert.fail('Embedded navigation must not close an overlay'); } });
 /** @param {any} node @param {string} id @returns {any} */
 function find(node, id) { return node?.props?.id === id ? node : (node?.nodes ?? []).map((/** @type {any} */ child) => find(child, id)).find(Boolean); }

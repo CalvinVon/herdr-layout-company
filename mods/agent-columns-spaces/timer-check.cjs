@@ -1,7 +1,14 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const source = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8').replace(/^import .*;\n/gm, '').replace('export default class ', 'class ');
+const mainSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+// The time part's retained root must stay a fixed 60×22 matching its content; a copy-paste
+// of the body's full-width flex_1 root would override the build and destabilize the row.
+assert.ok(mainSource.includes('el => el.w(60).h(22).flex_none()'), 'time part retained root must be a fixed 60x22 matching its content');
+// Text line-heights must be even so items_center yields an integral vertical offset; a
+// fractional auto line-height rasterizes at a half-pixel and drifts between frames.
+for (const m of mainSource.matchAll(/line_height\((\d+)\)/g)) assert.equal(Number(m[1]) % 2, 0, `text line-height ${m[1]} must be even`);
+const source = mainSource.replace(/^import .*;\n/gm, '').replace('export default class ', 'class ');
 const element = () => ({ child() { return this; } });
 const RetainedParts = new Function('View', 'div', `${fs.readFileSync(path.join(__dirname, 'retained-parts.js'), 'utf8').replace(/^import .*;\n/gm, '').replace('export class ', 'class ')}\nreturn RetainedParts;`)(class {}, element);
 
@@ -15,6 +22,7 @@ for (const floating of [false, true]) for (const active of [false, true]) for (c
     View: class {}, RetainedParts, props: () => floating ? { overlay: 'drawer' } : {}, placement: () => null,
     blockCollapsed: () => false, spaces: () => [{ id: 'space' }],
     layout: () => ({ children: [{ id: 'sidebar', hidden: state.hidden }] }),
+    shared: () => undefined, setShared: () => null,
   };
   const Spaces = new Function(...Object.keys(api), `${source}\nreturn SpacesTabs;`)(...Object.values(api));
   const cx = {
